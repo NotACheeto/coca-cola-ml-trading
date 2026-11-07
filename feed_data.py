@@ -54,8 +54,10 @@ def feed_and_update(
         prices = loader.fetch_data(use_cache=True)
         print(f"    Current dataset date span: {prices.index[0].date()} to {prices.index[-1].date()}")
 
+    target_ohlcv = loader.fetch_target_ohlcv(use_cache=True)
+
     # 2. Compute Updated Feature Matrix
-    print("[*] Step 2: Computing updated cross-asset features and spreads...")
+    print("[*] Step 2: Computing 200+ updated cross-asset features and spreads...")
     feat_cfg = config.get("features", {})
     engineer = FeatureEngineer(
         universe=universe,
@@ -64,7 +66,7 @@ def feed_and_update(
         cointegration_pairs=feat_cfg.get("cointegration_pairs", [["KO", "PEP"], ["KO", "XLP"], ["KO", "COKE"], ["KO", "TLT"]]),
         pca_components=feat_cfg.get("pca", {}).get("n_components", 3),
     )
-    X = engineer.compute_features(prices)
+    X = engineer.compute_features(prices, ohlcv=target_ohlcv)
 
     # 3. Compute Supervisory Target Labels
     print("[*] Step 3: Computing supervisory relative alpha targets...")
@@ -128,10 +130,16 @@ def feed_and_update(
     print(f"  LATEST LIVE TRADE RECOMMENDATION (FOR {decision['date']})")
     print("=" * 70)
     print(f"  Target Asset              : Coca-Cola ($KO)")
-    print(f"  Model Probability (Alpha) : {decision['probability_outperform']:.4f}")
-    print(f"  Signal Confidence         : {decision['confidence'] * 100:.1f}%")
+    print(f"  Model Probability (Alpha) : {decision.get('probability_outperform', 0.5):.4f}")
+    if "expected_alpha_5d_pct" in decision:
+        print(f"  Expected 5d Alpha Return  : {decision['expected_alpha_5d_pct']:+.3f}%")
+    if "predictive_volatility_pct" in decision:
+        print(f"  Predictive Volatility (5d): {decision['predictive_volatility_pct']:.2f}%")
+    conf = decision.get("confidence_pct", decision.get("confidence", 0) * 100.0)
+    print(f"  Signal Confidence         : {conf:.1f}%")
     print(f"  Recommended Action        : {decision['action']}")
-    print(f"  Suggested Position Weight : {decision['recommended_weight'] * 100:.1f}%")
+    weight = decision.get("recommended_weight_pct", decision.get("recommended_weight", 0) * 100.0)
+    print(f"  Suggested Position Weight : {weight:.1f}%")
     print("=" * 70)
 
 

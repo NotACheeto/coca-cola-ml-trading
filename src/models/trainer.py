@@ -62,7 +62,6 @@ class ModelTrainer:
             )
         elif self.model_type == "ridge":
             return LogisticRegression(
-                penalty="l2",
                 C=1.0,
                 max_iter=1000,
                 random_state=42,
@@ -169,6 +168,12 @@ class ModelTrainer:
         X_sub = X_latest[self.feature_names]
         X_scaled = pd.DataFrame(self.scaler.transform(X_sub), columns=self.feature_names, index=X_sub.index)
 
+        # If model has dedicated quant multi-task decision engine, use it
+        if hasattr(self.fitted_model, "predict_signal"):
+            res = self.fitted_model.predict_signal(X_scaled)
+            res["date"] = str(X_latest.index[-1].date())
+            return res
+
         # Predict probability of class 1 (Outperform)
         prob = float(self.fitted_model.predict_proba(X_scaled)[-1, 1])
 
@@ -186,10 +191,13 @@ class ModelTrainer:
 
         return {
             "date": str(X_latest.index[-1].date()),
-            "probability_outperform": prob,
-            "confidence": confidence,
+            "target": "Coca-Cola ($KO)",
+            "probability_outperform": round(prob, 4),
+            "confidence": round(confidence, 4),
+            "confidence_pct": round(confidence * 100.0, 1),
             "action": action,
-            "recommended_weight": round(target_weight, 2),
+            "recommended_weight": round(target_weight, 4),
+            "recommended_weight_pct": round(target_weight * 100.0, 1),
         }
 
     def save_model(self, output_path: str = "models/production_model.joblib"):

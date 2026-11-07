@@ -64,10 +64,11 @@ class TradingPipeline:
         """
         print(f"[*] Step 1: Ingesting asset data for universe: {self.universe.all_tickers}")
         prices = self.data_loader.fetch_data()
+        target_ohlcv = self.data_loader.fetch_target_ohlcv()
         print(f"    Loaded {len(prices)} rows across {len(prices.columns)} assets from {prices.index[0].date()} to {prices.index[-1].date()}")
 
-        print("[*] Step 2: Engineering cross-asset competitor & cointegration features")
-        X = self.feature_engineer.compute_features(prices)
+        print("[*] Step 2: Engineering 200+ cross-asset, commodity, rate, and microstructure features")
+        X = self.feature_engineer.compute_features(prices, ohlcv=target_ohlcv)
         print(f"    Created {X.shape[1]} engineered features")
 
         print("[*] Step 3: Generating forward relative alpha supervisory targets")

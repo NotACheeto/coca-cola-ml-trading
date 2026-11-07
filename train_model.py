@@ -42,14 +42,17 @@ def train(
 
     # Fetch training slice
     prices = loader.fetch_data()
+    target_ohlcv = loader.fetch_target_ohlcv()
     # Hard clamp to ensure zero data past cutoff
     prices = prices[prices.index <= pd.to_datetime(cutoff_date)]
+    target_ohlcv = target_ohlcv[target_ohlcv.index <= pd.to_datetime(cutoff_date)]
 
     print(f"    Training dataset span: {prices.index[0].date()} to {prices.index[-1].date()}")
     print(f"    Total trading days in training set: {len(prices)} bars")
     assert prices.index.max() <= pd.to_datetime(cutoff_date), f"Data leak! Found date {prices.index.max()} > {cutoff_date}"
+    assert target_ohlcv.index.max() <= pd.to_datetime(cutoff_date), f"Data leak in OHLCV! Found date {target_ohlcv.index.max()} > {cutoff_date}"
 
-    print("[*] Step 2: Engineering cross-asset competitor & cointegration features...")
+    print("[*] Step 2: Engineering 200+ cross-asset, commodity, rate, and microstructure factors...")
     feat_cfg = config.get("features", {})
     engineer = FeatureEngineer(
         universe=universe,
@@ -58,7 +61,7 @@ def train(
         cointegration_pairs=feat_cfg.get("cointegration_pairs", [["KO", "PEP"], ["KO", "XLP"], ["KO", "COKE"], ["KO", "TLT"]]),
         pca_components=feat_cfg.get("pca", {}).get("n_components", 3),
     )
-    X = engineer.compute_features(prices)
+    X = engineer.compute_features(prices, ohlcv=target_ohlcv)
 
     print("[*] Step 3: Computing supervisory relative alpha labels (KO vs XLP)...")
     label_cfg = config.get("labeling", {})

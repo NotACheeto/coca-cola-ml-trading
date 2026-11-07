@@ -47,12 +47,13 @@ def test_out_of_sample(
         start_date="2023-01-01",  # Warm-up period for 63-day rolling indicators
         end_date=None,             # Fetch up to current date
     )
-    prices = loader.fetch_data(use_cache=False)
+    prices = loader.fetch_data(use_cache=True)
+    target_ohlcv = loader.fetch_target_ohlcv(use_cache=True)
 
     print(f"    Total data available: {prices.index[0].date()} to {prices.index[-1].date()} ({len(prices)} bars)")
 
     # 3. Engineer features
-    print("[*] Step 3: Generating features on unseen data...")
+    print("[*] Step 3: Generating 200+ features on unseen data...")
     feat_cfg = config.get("features", {})
     engineer = FeatureEngineer(
         universe=universe,
@@ -61,7 +62,7 @@ def test_out_of_sample(
         cointegration_pairs=feat_cfg.get("cointegration_pairs", [["KO", "PEP"], ["KO", "XLP"], ["KO", "COKE"], ["KO", "TLT"]]),
         pca_components=feat_cfg.get("pca", {}).get("n_components", 3),
     )
-    X = engineer.compute_features(prices)
+    X = engineer.compute_features(prices, ohlcv=target_ohlcv)
 
     # Filter strictly to the test period (>= 2024-01-01)
     test_mask = X.index >= pd.to_datetime(test_start_date)

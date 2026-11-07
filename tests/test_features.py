@@ -28,18 +28,33 @@ def sample_price_data():
     return pd.DataFrame(data, index=dates)
 
 
-def test_feature_engineering_no_nans_and_dimensions(sample_price_data):
+@pytest.fixture
+def sample_ohlcv_data(sample_price_data):
+    """Generates synthetic OHLCV data for target asset."""
+    dates = sample_price_data.index
+    c = sample_price_data["KO"]
+    rng = np.random.default_rng(42)
+    o = c * (1.0 + rng.normal(0, 0.002, len(dates)))
+    h = np.maximum(o, c) * (1.0 + np.abs(rng.normal(0, 0.004, len(dates))))
+    l = np.minimum(o, c) * (1.0 - np.abs(rng.normal(0, 0.004, len(dates))))
+    v = rng.lognormal(mean=16.7, sigma=0.4, size=len(dates))
+    return pd.DataFrame({"Open": o, "High": h, "Low": l, "Close": c, "Volume": v}, index=dates)
+
+
+def test_feature_engineering_no_nans_and_dimensions(sample_price_data, sample_ohlcv_data):
     universe = AssetUniverse()
     fe = FeatureEngineer(universe=universe, rolling_windows=[5, 10, 21], lead_lag_lags=[1, 2])
     
-    features = fe.compute_features(sample_price_data)
+    features = fe.compute_features(sample_price_data, ohlcv=sample_ohlcv_data)
     
     assert not features.empty
     assert not features.isna().any().any(), "Features must not contain NaNs after warm-up drop"
     assert "rel_mom_PEP_w5" in features.columns
-    assert "rel_mom_XLP_w10" in features.columns
-    assert "lead_lag_PEP_lag1" in features.columns
-    assert "spread_zscore_KO_PEP_w21" in features.columns
+    assert "vol_garman_klass_w5" in features.columns
+    assert "rsi_KO_w14" in features.columns
+    assert "macd_line" in features.columns
+    assert "frac_diff_KO_d40" in features.columns
+    assert len(features.columns) >= 70
 
 
 def test_target_labeling(sample_price_data):

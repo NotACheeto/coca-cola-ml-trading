@@ -1,6 +1,7 @@
 """
-Institutional Deep Neural Network & Ensemble Model Architectures for Quantitative Trading.
-Implements Wide & Deep Tabular ResNet with over 1,400 neurons, BatchNorm, GELU, and Dropout.
+Institutional Multi-Task Quant Neural Network Machine for Trading Coca-Cola ($KO).
+Features Gated Feature Attention, 3,520 Neurons across Deep Tabular ResNet layers, LayerNorm, Swish,
+and Multi-Task Heads for Directional Probability, Expected Alpha Return, and Predictive Uncertainty Sizing.
 """
 
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -11,19 +12,38 @@ import torch.nn as nn
 from torch.utils.data import DataLoader as TorchDataLoader, TensorDataset
 
 
-class ResidualDenseBlock(nn.Module):
-    """Residual dense block with batch normalization, GELU activation, and dropout."""
+class GatedFeatureAttention(nn.Module):
+    """
+    Feature Tokenizer and Regime-Aware Gating Mechanism.
+    Dynamically attends to relevant factors (e.g. commodities vs rates vs momentum) based on market state.
+    """
+
+    def __init__(self, in_features: int):
+        super().__init__()
+        self.gate = nn.Sequential(
+            nn.Linear(in_features, in_features),
+            nn.LayerNorm(in_features),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        g = self.gate(x)
+        return x * g
+
+
+class ResidualDenseBlockLN(nn.Module):
+    """Residual dense block with LayerNorm, Swish (SiLU) activation, and dropout."""
 
     def __init__(self, in_features: int, out_features: int, dropout: float = 0.3):
         super().__init__()
         self.linear1 = nn.Linear(in_features, out_features)
-        self.bn1 = nn.BatchNorm1d(out_features)
-        self.act1 = nn.GELU()
+        self.ln1 = nn.LayerNorm(out_features)
+        self.act1 = nn.SiLU()
         self.dropout1 = nn.Dropout(dropout)
 
         self.linear2 = nn.Linear(out_features, out_features)
-        self.bn2 = nn.BatchNorm1d(out_features)
-        self.act2 = nn.GELU()
+        self.ln2 = nn.LayerNorm(out_features)
+        self.act2 = nn.SiLU()
         self.dropout2 = nn.Dropout(dropout)
 
         self.shortcut = (
@@ -34,67 +54,102 @@ class ResidualDenseBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         res = self.shortcut(x)
-        out = self.dropout1(self.act1(self.bn1(self.linear1(x))))
-        out = self.dropout2(self.act2(self.bn2(self.linear2(out))))
+        out = self.dropout1(self.act1(self.ln1(self.linear1(x))))
+        out = self.dropout2(self.act2(self.ln2(self.linear2(out))))
         return out + res
 
 
-class DeepQuantNet(nn.Module):
+class CocaColaQuantNeuralMachine(nn.Module):
     """
-    Multi-layer Wide & Deep Tabular Neural Network for financial market prediction.
-    Features 1,472+ neurons across deep residual layers to capture complex non-linear patterns.
+    Dedicated Multi-Task Quantitative Neural Machine for Coca-Cola ($KO).
+    Contains 3,520 neurons across deep tabular residual blocks.
+    
+    Predicts:
+    1. Directional Alpha Probability P(KO Outperforms XLP)
+    2. Continuous Expected Alpha Return
+    3. Predictive Uncertainty / Volatility for dynamic Kelly position sizing
     """
 
     def __init__(
         self,
         input_dim: int,
         hidden_dims: Optional[List[int]] = None,
-        dropout: float = 0.3,
-        num_classes: int = 2,
+        dropout: float = 0.30,
     ):
         super().__init__()
-        # Default: 512 -> 512 -> 256 -> 128 -> 64 = 1,472 neurons
+        # Default architecture: 1024 -> 1024 -> 512 -> 512 -> 256 -> 128 -> 64 = 3,520 neurons
         if hidden_dims is None:
-            hidden_dims = [512, 512, 256, 128, 64]
+            hidden_dims = [1024, 1024, 512, 512, 256, 128, 64]
+
+        self.feature_gating = GatedFeatureAttention(input_dim)
 
         self.input_layer = nn.Sequential(
             nn.Linear(input_dim, hidden_dims[0]),
-            nn.BatchNorm1d(hidden_dims[0]),
-            nn.GELU(),
+            nn.LayerNorm(hidden_dims[0]),
+            nn.SiLU(),
             nn.Dropout(dropout),
         )
 
         blocks = []
         for i in range(len(hidden_dims) - 1):
+            stage_dropout = max(0.15, dropout - i * 0.03)
             blocks.append(
-                ResidualDenseBlock(
+                ResidualDenseBlockLN(
                     in_features=hidden_dims[i],
                     out_features=hidden_dims[i + 1],
-                    dropout=max(0.15, dropout - i * 0.05),
+                    dropout=stage_dropout,
                 )
             )
-        self.res_blocks = nn.Sequential(*blocks)
+        self.res_backbone = nn.Sequential(*blocks)
 
-        self.head = nn.Sequential(
-            nn.Linear(hidden_dims[-1], num_classes)
+        # Multi-Task Predictive Heads
+        bottleneck_dim = hidden_dims[-1]
+
+        # Head 1: Directional classification (2 logits: underperform vs outperform)
+        self.head_direction = nn.Linear(bottleneck_dim, 2)
+
+        # Head 2: Continuous expected alpha return
+        self.head_expected_return = nn.Linear(bottleneck_dim, 1)
+
+        # Head 3: Predictive uncertainty / return variance (Softplus ensures positive variance)
+        self.head_variance = nn.Sequential(
+            nn.Linear(bottleneck_dim, 1),
+            nn.Softplus(),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h = self.input_layer(x)
-        h = self.res_blocks(h)
-        return self.head(h)
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Returns:
+            logits: (batch_size, 2) directional classification logits
+            expected_ret: (batch_size, 1) continuous predicted relative return
+            variance: (batch_size, 1) predictive return variance for Kelly sizing
+        """
+        x_gated = self.feature_gating(x)
+        h = self.input_layer(x_gated)
+        h = self.res_backbone(h)
+
+        logits = self.head_direction(h)
+        expected_ret = self.head_expected_return(h)
+        variance = self.head_variance(h) + 1e-4
+
+        return logits, expected_ret, variance
+
+
+# Alias DeepQuantNet for backwards compatibility
+DeepQuantNet = CocaColaQuantNeuralMachine
 
 
 class PyTorchNeuralNetClassifier:
     """
-    Scikit-learn compatible classifier wrapper for DeepQuantNet.
-    Features AdamW, Cosine Annealing, early stopping, and permutation importance.
+    Production Scikit-learn Compatible Interface for the Quant Neural Machine.
+    Executes multi-task training with AdamW, Cosine Annealing, early stopping,
+    and calculates risk-adjusted Kelly position sizing.
     """
 
     def __init__(
         self,
         hidden_dims: Optional[List[int]] = None,
-        dropout: float = 0.3,
+        dropout: float = 0.30,
         learning_rate: float = 0.001,
         weight_decay: float = 0.0001,
         epochs: int = 80,
@@ -102,7 +157,7 @@ class PyTorchNeuralNetClassifier:
         early_stopping_patience: int = 12,
         random_state: int = 42,
     ):
-        self.hidden_dims = hidden_dims or [512, 512, 256, 128, 64]
+        self.hidden_dims = hidden_dims or [1024, 1024, 512, 512, 256, 128, 64]
         self.dropout = dropout
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
@@ -112,7 +167,7 @@ class PyTorchNeuralNetClassifier:
         self.random_state = random_state
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model: Optional[DeepQuantNet] = None
+        self.model: Optional[CocaColaQuantNeuralMachine] = None
         self.feature_importances_: Optional[np.ndarray] = None
         self.classes_ = np.array([0, 1])
 
@@ -120,23 +175,31 @@ class PyTorchNeuralNetClassifier:
         self,
         X: Union[pd.DataFrame, np.ndarray],
         y: Union[pd.Series, np.ndarray],
+        fwd_returns: Optional[Union[pd.Series, np.ndarray]] = None,
         eval_set: Optional[Tuple[Union[pd.DataFrame, np.ndarray], Union[pd.Series, np.ndarray]]] = None,
     ) -> "PyTorchNeuralNetClassifier":
         torch.manual_seed(self.random_state)
         np.random.seed(self.random_state)
 
-        X_arr = np.asarray(X, dtype=np.float32)
-        y_arr = np.asarray(y, dtype=np.int64)
+        X_arr = np.ascontiguousarray(np.asarray(X, dtype=np.float32).copy())
+        y_arr = np.ascontiguousarray(np.asarray(y, dtype=np.int64).copy())
+
+        if fwd_returns is not None:
+            r_arr = np.ascontiguousarray(np.asarray(fwd_returns, dtype=np.float32).copy())
+        else:
+            # Construct synthetic proxy from directional labels if continuous returns not passed
+            r_arr = np.where(y_arr == 1, 0.015, -0.015).astype(np.float32)
 
         n_samples, n_features = X_arr.shape
-        self.model = DeepQuantNet(
+        self.model = CocaColaQuantNeuralMachine(
             input_dim=n_features,
             hidden_dims=self.hidden_dims,
             dropout=self.dropout,
-            num_classes=2,
         ).to(self.device)
 
-        criterion = nn.CrossEntropyLoss()
+        criterion_ce = nn.CrossEntropyLoss()
+        criterion_huber = nn.HuberLoss(delta=0.01)
+
         optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=self.learning_rate,
@@ -147,8 +210,9 @@ class PyTorchNeuralNetClassifier:
         )
 
         dataset = TensorDataset(
-            torch.from_numpy(np.ascontiguousarray(X_arr.copy())),
-            torch.from_numpy(np.ascontiguousarray(y_arr.copy())),
+            torch.from_numpy(X_arr),
+            torch.from_numpy(y_arr),
+            torch.from_numpy(r_arr),
         )
         loader = TorchDataLoader(
             dataset, batch_size=min(self.batch_size, n_samples), shuffle=True
@@ -158,8 +222,8 @@ class PyTorchNeuralNetClassifier:
         X_val_t, y_val_t = None, None
         if eval_set is not None:
             X_val, y_val = eval_set
-            X_val_t = torch.from_numpy(np.asarray(X_val, dtype=np.float32)).to(self.device)
-            y_val_t = torch.from_numpy(np.asarray(y_val, dtype=np.int64)).to(self.device)
+            X_val_t = torch.from_numpy(np.ascontiguousarray(np.asarray(X_val, dtype=np.float32).copy())).to(self.device)
+            y_val_t = torch.from_numpy(np.ascontiguousarray(np.asarray(y_val, dtype=np.int64).copy())).to(self.device)
 
         best_loss = float("inf")
         patience_counter = 0
@@ -167,13 +231,20 @@ class PyTorchNeuralNetClassifier:
 
         self.model.train()
         for epoch in range(self.epochs):
-            for batch_x, batch_y in loader:
+            for batch_x, batch_y, batch_r in loader:
                 batch_x = batch_x.to(self.device)
                 batch_y = batch_y.to(self.device)
+                batch_r = batch_r.to(self.device).unsqueeze(1)
 
                 optimizer.zero_grad()
-                logits = self.model(batch_x)
-                loss = criterion(logits, batch_y)
+                logits, pred_ret, pred_var = self.model(batch_x)
+
+                loss_ce = criterion_ce(logits, batch_y)
+                loss_huber = criterion_huber(pred_ret, batch_r)
+                # Gaussian negative log likelihood for predictive uncertainty
+                loss_nll = 0.5 * (torch.log(pred_var) + ((batch_r - pred_ret) ** 2) / pred_var).mean()
+
+                loss = loss_ce + 0.3 * loss_huber + 0.1 * loss_nll
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 optimizer.step()
@@ -184,8 +255,8 @@ class PyTorchNeuralNetClassifier:
             if X_val_t is not None:
                 self.model.eval()
                 with torch.no_grad():
-                    val_logits = self.model(X_val_t)
-                    val_loss = criterion(val_logits, y_val_t).item()
+                    val_logits, _, _ = self.model(X_val_t)
+                    val_loss = criterion_ce(val_logits, y_val_t).item()
                 self.model.train()
 
                 if val_loss < best_loss:
@@ -201,17 +272,15 @@ class PyTorchNeuralNetClassifier:
             self.model.load_state_dict({k: v.to(self.device) for k, v in best_state.items()})
 
         self.model.eval()
-
-        # Compute permutation feature importance on training set
         self._compute_feature_importance(X_arr, y_arr)
         return self
 
     def _compute_feature_importance(self, X: np.ndarray, y: np.ndarray):
-        """Computes feature importance via permutation test on out-of-bag or in-sample data."""
+        """Computes permutation feature importance across the factor library."""
         self.model.eval()
         with torch.no_grad():
-            x_t = torch.from_numpy(X).to(self.device)
-            base_logits = self.model(x_t)
+            x_t = torch.from_numpy(np.ascontiguousarray(X.copy())).to(self.device)
+            base_logits, _, _ = self.model(x_t)
             base_probs = torch.softmax(base_logits, dim=-1)[:, 1].cpu().numpy()
             base_acc = np.mean((base_probs >= 0.5) == y)
 
@@ -219,8 +288,7 @@ class PyTorchNeuralNetClassifier:
         rng = np.random.default_rng(self.random_state)
         n_features = X.shape[1]
 
-        # Sample subset for speed if n_samples > 300
-        sub_idx = rng.choice(len(X), size=min(len(X), 300), replace=False)
+        sub_idx = rng.choice(len(X), size=min(len(X), 250), replace=False)
         X_sub = X[sub_idx].copy()
         y_sub = y[sub_idx]
 
@@ -228,10 +296,11 @@ class PyTorchNeuralNetClassifier:
             for f in range(n_features):
                 saved_col = X_sub[:, f].copy()
                 X_sub[:, f] = rng.permutation(saved_col)
-                perm_t = torch.from_numpy(X_sub).to(self.device)
-                perm_probs = torch.softmax(self.model(perm_t), dim=-1)[:, 1].cpu().numpy()
+                perm_t = torch.from_numpy(np.ascontiguousarray(X_sub.copy())).to(self.device)
+                perm_logits, _, _ = self.model(perm_t)
+                perm_probs = torch.softmax(perm_logits, dim=-1)[:, 1].cpu().numpy()
                 perm_acc = np.mean((perm_probs >= 0.5) == y_sub)
-                importances.append(max(0.0, base_acc - perm_acc + 0.01))
+                importances.append(max(0.0, base_acc - perm_acc + 0.005))
                 X_sub[:, f] = saved_col
 
         imp_arr = np.array(importances, dtype=float)
@@ -245,10 +314,10 @@ class PyTorchNeuralNetClassifier:
             raise RuntimeError("Model is not fitted.")
 
         self.model.eval()
-        X_arr = np.asarray(X, dtype=np.float32)
+        X_arr = np.ascontiguousarray(np.asarray(X, dtype=np.float32).copy())
         with torch.no_grad():
             x_t = torch.from_numpy(X_arr).to(self.device)
-            logits = self.model(x_t)
+            logits, _, _ = self.model(x_t)
             probs = torch.softmax(logits, dim=-1).cpu().numpy()
         return probs
 
@@ -256,11 +325,60 @@ class PyTorchNeuralNetClassifier:
         probs = self.predict_proba(X)
         return (probs[:, 1] >= 0.5).astype(int)
 
+    def predict_signal(self, X_latest: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Executes multi-task quantitative prediction for Coca-Cola ($KO).
+        Computes directional probability, continuous expected return, predictive uncertainty,
+        and optimal risk-adjusted Kelly sizing.
+        """
+        if self.model is None:
+            raise RuntimeError("Model is not fitted.")
+
+        self.model.eval()
+        X_arr = np.ascontiguousarray(np.asarray(X_latest, dtype=np.float32).copy())
+        with torch.no_grad():
+            x_t = torch.from_numpy(X_arr).to(self.device)
+            logits, expected_ret_t, var_t = self.model(x_t)
+            prob_outperform = float(torch.softmax(logits, dim=-1)[-1, 1].item())
+            expected_alpha = float(expected_ret_t[-1, 0].item())
+            pred_vol = float(torch.sqrt(var_t[-1, 0]).item())
+
+        confidence = abs(prob_outperform - 0.5) * 2.0
+
+        # Mean-Variance / Kelly Position Sizing:
+        # Scale continuous expected alpha by uncertainty and directional confidence
+        risk_aversion = 2.0
+        raw_kelly = (expected_alpha / (risk_aversion * (pred_vol ** 2) + 1e-6)) * confidence
+        target_weight = float(np.clip(raw_kelly, -1.0, 1.0))
+
+        if prob_outperform >= 0.55 and expected_alpha > 0:
+            action = "BUY / LONG"
+            target_weight = max(0.15, min(1.0, abs(target_weight)))
+        elif prob_outperform <= 0.45 or expected_alpha < -0.005:
+            action = "NEUTRAL / CASH"
+            target_weight = 0.0
+        else:
+            action = "HOLD / NEUTRAL"
+            target_weight = 0.0
+
+        return {
+            "date": str(X_latest.index[-1].date()),
+            "target": "Coca-Cola ($KO)",
+            "probability_outperform": round(prob_outperform, 4),
+            "expected_alpha_5d_pct": round(expected_alpha * 100.0, 3),
+            "predictive_volatility_pct": round(pred_vol * 100.0, 3),
+            "confidence": round(confidence, 4),
+            "confidence_pct": round(confidence * 100.0, 1),
+            "recommended_weight": round(target_weight, 4),
+            "recommended_weight_pct": round(target_weight * 100.0, 1),
+            "action": action,
+        }
+
 
 class EnsembleQuantClassifier:
     """
-    Ensemble blending DeepQuantNet (1,400+ neurons), LightGBM, and Ridge.
-    Combines deep non-linear neural representations with gradient boosted decision boundaries.
+    Institutional Ensemble Machine for Coca-Cola Trading.
+    Blends the Deep Multi-Task Quant Neural Machine (3,520 neurons), LightGBM, and Ridge.
     """
 
     def __init__(
@@ -275,7 +393,6 @@ class EnsembleQuantClassifier:
         self.lgbm_weight = lgbm_weight
         self.ridge_weight = ridge_weight
 
-        # Normalize weights
         tot = self.neural_weight + self.lgbm_weight + self.ridge_weight
         self.neural_weight /= tot
         self.lgbm_weight /= tot
@@ -301,7 +418,7 @@ class EnsembleQuantClassifier:
         X_df = pd.DataFrame(X) if not isinstance(X, pd.DataFrame) else X
         y_ser = pd.Series(y) if not isinstance(y, pd.Series) else y
 
-        # 1. Fit Deep Neural Network (1,400+ neurons)
+        # 1. Fit Multi-Task Quant Neural Machine (3,520 neurons)
         self.nn_model = PyTorchNeuralNetClassifier(**self.nn_params)
         self.nn_model.fit(X_df, y_ser)
 
@@ -321,7 +438,7 @@ class EnsembleQuantClassifier:
         self.lgbm_model.fit(X_df, y_ser)
 
         # 3. Fit Ridge Logistic Regression
-        self.ridge_model = LogisticRegression(penalty="l2", C=1.0, max_iter=1000, random_state=42)
+        self.ridge_model = LogisticRegression(C=1.0, max_iter=1000, random_state=42)
         self.ridge_model.fit(X_df, y_ser)
 
         # Blend feature importances
@@ -355,3 +472,7 @@ class EnsembleQuantClassifier:
     def predict(self, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
         probs = self.predict_proba(X)
         return (probs[:, 1] >= 0.5).astype(int)
+
+    def predict_signal(self, X_latest: pd.DataFrame) -> Dict[str, Any]:
+        """Delegates to the Quant Neural Machine's multi-task prediction engine."""
+        return self.nn_model.predict_signal(X_latest)

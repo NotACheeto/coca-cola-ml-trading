@@ -76,6 +76,31 @@ class DataLoader:
             # Ensure proper timezone-naive DatetimeIndex
             adj_close.index = pd.to_datetime(adj_close.index).tz_localize(None)
 
+            # Extract full OHLCV for target asset (KO) for deep microstructure & volatility factor modeling
+            target = self.universe.target
+            target_ohlcv = pd.DataFrame(index=raw_data.index)
+            for field in ["Open", "High", "Low", "Close", "Adj Close", "Volume"]:
+                if field in raw_data.columns:
+                    col_data = raw_data[field]
+                    if isinstance(col_data, pd.DataFrame) and target in col_data.columns:
+                        target_ohlcv[field] = col_data[target]
+                    elif isinstance(col_data, pd.Series):
+                        target_ohlcv[field] = col_data
+
+            if not target_ohlcv.empty:
+                target_ohlcv.index = pd.to_datetime(target_ohlcv.index).tz_localize(None)
+                target_ohlcv = target_ohlcv.sort_index().ffill().bfill()
+                ohlcv_cache_file = self.cache_dir / "target_ohlcv.parquet" if self.cache_dir else None
+                if ohlcv_cache_file:
+                    if ohlcv_cache_file.exists():
+                        try:
+                            cached_ohlcv = pd.read_parquet(ohlcv_cache_file)
+                            target_ohlcv = target_ohlcv.combine_first(cached_ohlcv).sort_index()
+                            target_ohlcv = target_ohlcv[~target_ohlcv.index.duplicated(keep="last")]
+                        except Exception:
+                            pass
+                    target_ohlcv.to_parquet(ohlcv_cache_file)
+
             # Clean and align data
             adj_close = adj_close.sort_index()
             adj_close = adj_close.ffill().bfill()
@@ -108,6 +133,60 @@ class DataLoader:
             # Fallback for offline testing or rate-limits: generate realistic synthetic series
             print(f"[Warning] Failed to fetch online data ({e}). Generating synthetic data.")
             return self._generate_synthetic_data()
+
+    def fetch_target_ohlcv(self, use_cache: bool = True) -> pd.DataFrame:
+        """
+        Fetches full Open, High, Low, Close, Volume history for target asset (KO).
+        """
+        ohlcv_cache = self.cache_dir / "target_ohlcv.parquet" if self.cache_dir else None
+        if use_cache and ohlcv_cache and ohlcv_cache.exists():
+            try:
+                df = pd.read_parquet(ohlcv_cache)
+                if not df.empty and "Close" in df.columns:
+                    if self.start_date:
+                        df = df[df.index >= pd.to_datetime(self.start_date)]
+                    if self.end_date:
+                        df = df[df.index <= pd.to_datetime(self.end_date)]
+                    return df
+            except Exception:
+                pass
+
+        # If cache not populated, trigger fetch_data
+        self.fetch_data(use_cache=use_cache)
+        if ohlcv_cache and ohlcv_cache.exists():
+            try:
+                df = pd.read_parquet(ohlcv_cache)
+                if self.start_date:
+                    df = df[df.index >= pd.to_datetime(self.start_date)]
+                if self.end_date:
+                    df = df[df.index <= pd.to_datetime(self.end_date)]
+                return df
+            except Exception:
+                pass
+
+        return self._generate_synthetic_target_ohlcv()
+
+    def _generate_synthetic_target_ohlcv(self, n_days: int = 1500) -> pd.DataFrame:
+        """Generates realistic synthetic OHLCV data for target asset."""
+        rng = np.random.default_rng(42)
+        dates = pd.date_range(end=pd.Timestamp.now().normalize(), periods=n_days, freq="B")
+        ret = rng.normal(0.0003, 0.008, n_days)
+        close = 50.0 * np.exp(np.cumsum(ret))
+        open_p = close * (1.0 + rng.normal(0, 0.002, n_days))
+        high_p = np.maximum(open_p, close) * (1.0 + np.abs(rng.normal(0, 0.005, n_days)))
+        low_p = np.minimum(open_p, close) * (1.0 - np.abs(rng.normal(0, 0.005, n_days)))
+        volume = rng.lognormal(mean=16.7, sigma=0.4, size=n_days)
+        return pd.DataFrame(
+            {
+                "Open": open_p,
+                "High": high_p,
+                "Low": low_p,
+                "Close": close,
+                "Adj Close": close,
+                "Volume": volume,
+            },
+            index=dates,
+        )
 
     def _generate_synthetic_data(self, n_days: int = 1500) -> pd.DataFrame:
         """
