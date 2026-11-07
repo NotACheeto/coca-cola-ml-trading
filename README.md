@@ -138,18 +138,44 @@ Verify that all feature transformations, leak-free splitters, and backtest math 
 pytest tests/
 ```
 
-### 3. Run the Strategy Backtest
-Execute the end-to-end pipeline (Data Ingestion $\rightarrow$ Feature Engineering $\rightarrow$ Purged Walk-Forward Training $\rightarrow$ Backtest Simulation $\rightarrow$ Tear Sheet Generation):
+### 3. Step-by-Step Training & Data Feeding Workflow
+
+#### Step A: Train Model Strictly on Data $\le$ 2023
+Train the model on historical market data up to December 31, 2023, while keeping 2024+ completely unseen:
 
 ```bash
-python run_backtest.py --config config/default_config.yaml
+python train_model.py --cutoff-date 2023-12-31
 ```
+* **Learns:** Optimal decision tree splits and feature weights from 2019–2023.
+* **Outputs:** Serialized model bundle saved to `models/ko_model_up_to_2023.joblib`.
 
-The script will output:
-1. **Model Evaluation Metrics:** Out-of-fold ROC-AUC, Directional Accuracy, and Spearman Information Coefficient (IC).
-2. **Top Predictive Features:** Ranking the highest contributing cross-asset and cointegration signals.
-3. **Performance Tear Sheet:** Comparative breakdown of ML Strategy (net of fees) vs. Coca-Cola Buy & Hold and XLP Sector ETF.
-4. **Visual Chart:** Saved to `results/tear_sheet.png`.
+#### Step B: Test on Reserved 2024+ Out-of-Sample Data
+Evaluate the 2023-trained model against the held-out 2024–present market data:
+
+```bash
+python test_out_of_sample.py --test-start 2024-01-01
+```
+* **Simulates:** Execution lag, 5 bps transaction costs, and confidence-weighted sizing on unseen data.
+* **Outputs:** Comparison metrics vs. Coca-Cola and XLP benchmarks, plus a tear sheet in `results/out_of_sample_2024_2026.png`.
+
+#### Step C: Feed New Data & Adapt Model Weights
+As new market bars arrive (or from a custom CSV), feed the data to adapt the model weights:
+
+```bash
+# Option 1: Ingest latest daily market bars online and adapt weights
+python feed_data.py --live --rolling-window 500
+
+# Option 2: Feed a custom proprietary CSV file
+python feed_data.py --csv path/to/my_prices.csv
+
+# Option 3: Adjust weights using trailing 500 trading days
+python feed_data.py --rolling-window 500
+```
+This script will:
+1. Ingest the new data and compute updated cross-asset features.
+2. Display a table showing **how model weights shifted** compared to the prior checkpoint.
+3. Save the updated model checkpoint to `models/ko_model_updated.joblib`.
+4. Output the **latest trade decision for tomorrow** (Probability, Action, Confidence, Position Size).
 
 ---
 

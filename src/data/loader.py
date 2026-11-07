@@ -4,7 +4,7 @@ Data ingestion, caching, and preprocessing for multi-asset universe.
 
 import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -41,6 +41,10 @@ class DataLoader:
             try:
                 df = pd.read_parquet(cache_file)
                 if not df.empty and all(t in df.columns for t in self.universe.all_tickers):
+                    if self.start_date:
+                        df = df[df.index >= pd.to_datetime(self.start_date)]
+                    if self.end_date:
+                        df = df[df.index <= pd.to_datetime(self.end_date)]
                     return df
             except Exception:
                 pass  # Fall back to live download if cache is corrupt
@@ -76,6 +80,11 @@ class DataLoader:
             adj_close = adj_close.sort_index()
             adj_close = adj_close.ffill().bfill()
             adj_close = adj_close.dropna(subset=[self.universe.target])
+
+            if self.start_date:
+                adj_close = adj_close[adj_close.index >= pd.to_datetime(self.start_date)]
+            if self.end_date:
+                adj_close = adj_close[adj_close.index <= pd.to_datetime(self.end_date)]
 
             if cache_file:
                 adj_close.to_parquet(cache_file)
@@ -124,3 +133,106 @@ class DataLoader:
 
         df = pd.DataFrame(data, index=dates)
         return df
+
+    def save_prices(self, df: pd.DataFrame) -> Path:
+        """Saves price matrix to disk cache."""
+        if not self.cache_dir:
+            self.cache_dir = Path("data/cache")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = self.cache_dir / "prices_cache.parquet"
+        df.to_parquet(cache_file)
+        return cache_file
+
+    def load_from_csv(self, file_path: str) -> pd.DataFrame:
+        """
+        Loads user-provided CSV file containing date index and ticker price columns.
+        Validates columns, converts date index, merges with cache if needed, and saves.
+        """
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Custom data file not found: {file_path}")
+
+        df = pd.read_csv(path)
+        date_col = None
+        for col in ["Date", "date", "DATETIME", "timestamp", "Timestamp"]:
+            if col in df.columns:
+                date_col = col
+                break
+
+        if date_col:
+            df[date_col] = pd.to_datetime(df[date_col])
+            df = df.set_index(date_col)
+        else:
+            # Assume first column is date
+            df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0])
+            df = df.set_index(df.columns[0])
+
+        df.index = pd.to_datetime(df.index).tz_localize(None)
+        df = df.sort_index().ffill().bfill()
+        
+        # Merge with existing cache if available
+        cache_file = self.cache_dir / "prices_cache.parquet" if self.cache_dir else None
+        if cache_file and cache_file.exists():
+            try:
+                cached_df = pd.read_parquet(cache_file)
+                df = df.combine_first(cached_df).sort_index()
+            except Exception:
+                pass
+
+        self.save_prices(df)
+        return df
+
+    def update_latest(self) -> Tuple[pd.DataFrame, int]:
+        """
+        Fetches newest daily bars from Yahoo Finance and merges into existing cache.
+        Returns:
+            updated_df: DataFrame with updated price series
+            new_bars_count: Number of new trading bars ingested
+        """
+        current_data = self.fetch_data(use_cache=True)
+        latest_date = current_data.index[-1]
+        
+        # Download from latest_date onwards
+        start_fetch = (latest_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+        today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
+
+        if start_fetch >= today_str:
+            return current_data, 0
+
+        try:
+            new_raw = yf.download(
+                tickers=self.universe.all_tickers,
+                start=start_fetch,
+                auto_adjust=False,
+                progress=False,
+            )
+            if new_raw.empty:
+                return current_data, 0
+
+            if "Adj Close" in new_raw.columns:
+                new_adj = new_raw["Adj Close"].copy()
+            elif "Close" in new_raw.columns:
+                new_adj = new_raw["Close"].copy()
+            else:
+                return current_data, 0
+
+            if isinstance(new_adj, pd.Series):
+                new_adj = new_adj.to_frame(name=self.universe.all_tickers[0])
+
+            new_adj.index = pd.to_datetime(new_adj.index).tz_localize(None)
+            new_adj = new_adj.dropna(how="all")
+
+            # Combine and deduplicate
+            combined = pd.concat([current_data, new_adj]).sort_index()
+            combined = combined[~combined.index.duplicated(keep="last")]
+            combined = combined.ffill().bfill()
+
+            new_bars = len(combined) - len(current_data)
+            if new_bars > 0:
+                self.save_prices(combined)
+
+            return combined, max(0, new_bars)
+
+        except Exception as e:
+            print(f"[Warning] Failed to update latest data online: {e}")
+            return current_data, 0

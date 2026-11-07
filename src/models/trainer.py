@@ -2,7 +2,9 @@
 Model training pipeline with strict out-of-sample generation and feature importance.
 """
 
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+import joblib
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
@@ -107,3 +109,89 @@ class ModelTrainer:
         }).sort_values(by="importance", ascending=False).reset_index(drop=True)
 
         return clean_oof_probs, clean_oof_targets, importance_df
+
+    def fit_production(self, X: pd.DataFrame, y: pd.Series) -> pd.DataFrame:
+        """
+        Fits final model on all provided training data (e.g. data <= 2023-12-31).
+        Stores fitted model, scaler, and calculates final feature importances.
+        """
+        self.feature_names = list(X.columns)
+        self.scaler = StandardScaler()
+        X_scaled = pd.DataFrame(self.scaler.fit_transform(X), columns=self.feature_names, index=X.index)
+
+        self.fitted_model = self._get_base_estimator()
+        self.fitted_model.fit(X_scaled, y)
+
+        if hasattr(self.fitted_model, "feature_importances_"):
+            importances = self.fitted_model.feature_importances_
+        elif hasattr(self.fitted_model, "coef_"):
+            importances = np.abs(self.fitted_model.coef_[0])
+        else:
+            importances = np.zeros(len(self.feature_names))
+
+        importance_df = pd.DataFrame({
+            "feature": self.feature_names,
+            "importance": importances,
+        }).sort_values(by="importance", ascending=False).reset_index(drop=True)
+
+        return importance_df
+
+    def predict_signal(self, X_latest: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Generates prediction and sizing recommendation for the latest observation bar.
+        """
+        if not hasattr(self, "fitted_model") or self.fitted_model is None:
+            raise RuntimeError("Model has not been fitted. Call fit_production or load_model first.")
+
+        # Ensure correct column ordering
+        X_sub = X_latest[self.feature_names]
+        X_scaled = pd.DataFrame(self.scaler.transform(X_sub), columns=self.feature_names, index=X_sub.index)
+
+        # Predict probability of class 1 (Outperform)
+        prob = float(self.fitted_model.predict_proba(X_scaled)[-1, 1])
+
+        # Sizing and action
+        confidence = abs(prob - 0.5) * 2.0
+        if prob >= 0.55:
+            action = "BUY / LONG"
+            target_weight = min(1.0, confidence * 1.5)
+        elif prob <= 0.45:
+            action = "NEUTRAL / CASH"  # Or SHORT if shorting is permitted
+            target_weight = 0.0
+        else:
+            action = "HOLD / NEUTRAL"
+            target_weight = 0.0
+
+        return {
+            "date": str(X_latest.index[-1].date()),
+            "probability_outperform": prob,
+            "confidence": confidence,
+            "action": action,
+            "recommended_weight": round(target_weight, 2),
+        }
+
+    def save_model(self, output_path: str = "models/production_model.joblib"):
+        """Serializes the trained model bundle to disk."""
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        bundle = {
+            "model": self.fitted_model,
+            "scaler": self.scaler,
+            "feature_names": self.feature_names,
+            "config": self.config,
+            "saved_at": pd.Timestamp.now().isoformat(),
+        }
+        joblib.dump(bundle, out)
+        print(f"[*] Saved trained model checkpoint to {output_path}")
+
+    def load_model(self, model_path: str = "models/production_model.joblib"):
+        """Loads a pre-trained model bundle from disk."""
+        path = Path(model_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Model file not found at {model_path}")
+        bundle = joblib.load(path)
+        self.fitted_model = bundle["model"]
+        self.scaler = bundle["scaler"]
+        self.feature_names = bundle["feature_names"]
+        print(f"[*] Loaded trained model checkpoint from {model_path} (trained with {len(self.feature_names)} features)")
+
