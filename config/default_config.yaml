@@ -1,0 +1,62 @@
+target: "KO"
+
+universe:
+  direct_competitors:
+    - "PEP"   # PepsiCo (primary direct rival)
+    - "KDP"   # Keurig Dr Pepper (sodas, juices, coffee)
+    - "MNST"  # Monster Beverage (energy drinks, KO distribution partner)
+    - "CELH"  # Celsius Holdings (growth peer in functional energy)
+  bottlers:
+    - "COKE"  # Coca-Cola Consolidated (largest independent US bottler)
+    - "KOF"   # Coca-Cola FEMSA (Latin American anchor bottler)
+  suppliers:
+    - "BALL"  # Ball Corporation (aluminum beverage packaging)
+    - "CCK"   # Crown Holdings (packaging & beverage cans)
+  macro_and_sector:
+    - "XLP"   # Consumer Staples Select Sector SPDR (sector benchmark)
+    - "SPY"   # S&P 500 ETF (broad market risk premium)
+    - "UUP"   # Invesco DB US Dollar Index (FX exposure for global revenues)
+
+data:
+  start_date: "2019-01-01"
+  end_date: null  # null means fetch up to current date
+  cache_dir: "data/cache"
+
+features:
+  rolling_windows: [5, 10, 21, 63] # 1w, 2w, 1m, 1q
+  lead_lag_lags: [1, 2, 3]         # Prior days competitor return leads
+  cointegration_pairs:
+    - ["KO", "PEP"]
+    - ["KO", "XLP"]
+  pca:
+    enabled: true
+    n_components: 3
+
+labeling:
+  forward_horizon: 5               # 5 trading days forward
+  target_type: "relative_alpha"    # Forward KO return minus Forward XLP return
+  neutral_threshold: 0.0015        # +/- 15 bps buffer to filter noise
+
+model:
+  type: "lightgbm"                 # "lightgbm" or "ridge"
+  cv:
+    n_splits: 5
+    purge_window: 5                # Purge overlapping forward-looking label windows
+    embargo_pct: 0.01              # Embargo fold borders
+  hyperparameters:
+    n_estimators: 150
+    learning_rate: 0.03
+    max_depth: 4
+    num_leaves: 15
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_alpha: 0.1
+    reg_lambda: 1.0
+    random_state: 42
+
+backtest:
+  initial_capital: 100000.0
+  transaction_cost_bps: 5.0        # 5 bps per side (slippage + fee)
+  position_sizing: "confidence_weighted" # "binary", "confidence_weighted", "volatility_target"
+  target_volatility: 0.12          # 12% annualized target volatility
+  max_leverage: 1.0
