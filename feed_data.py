@@ -123,26 +123,34 @@ def feed_and_update(
     # 7. Save Updated Model Checkpoint
     trainer.save_model(save_updated_model)
 
-    # 8. Produce Live Trade Signal for Tomorrow
+    # 8. Multi-Strategy Quant Alpha Telemetry (StatArb, TSMOM, Cross-Asset, Macro, and ML)
     latest_bar = X.iloc[[-1]]
     decision = trainer.predict_signal(latest_bar)
 
+    from src.strategies.combiner import MultiStrategyAlphaCombiner
+    combiner = MultiStrategyAlphaCombiner()
+    ml_series = pd.Series([decision["probability_outperform"]], index=latest_bar.index)
+    composite_df = combiner.generate_composite_signals(prices, ml_series, target_ticker="KO")
+    comp_row = composite_df.iloc[-1]
+
     print("\n" + "=" * 70)
-    print(f"  LATEST LIVE TRADE RECOMMENDATION (FOR {decision['date']})")
+    print(f"  INSTITUTIONAL QUANT MULTI-STRATEGY TELEMETRY (FOR {decision['date']})")
     print("=" * 70)
     print(f"  Target Asset              : Coca-Cola ($KO)")
     if "session" in decision:
         print(f"  Session Checkpoint        : {decision['session']}")
-    print(f"  Model Probability (Alpha) : {decision.get('probability_outperform', 0.5):.4f}")
-    if "expected_alpha_5d_pct" in decision:
-        print(f"  Expected 5d Alpha Return  : {decision['expected_alpha_5d_pct']:+.3f}%")
-    if "predictive_volatility_pct" in decision:
-        print(f"  Predictive Volatility (5d): {decision['predictive_volatility_pct']:.2f}%")
-    conf = decision.get("confidence_pct", decision.get("confidence", 0) * 100.0)
-    print(f"  Signal Confidence         : {conf:.1f}%")
-    print(f"  Recommended Action        : {decision['action']}")
-    weight = decision.get("recommended_weight_pct", decision.get("recommended_weight", 0) * 100.0)
-    print(f"  Suggested Position Weight : {weight:.1f}%")
+    print(f"  Macroeconomic Regime      : {comp_row['macro_regime']}")
+    print(f"  Statistical Arbitrage Z   : {comp_row['stat_arb_zscore']:+.2f} ({'Oversold / Long KO' if comp_row['stat_arb_zscore'] < -1.0 else 'Overbought / Short KO' if comp_row['stat_arb_zscore'] > 1.0 else 'Fair Value Equilibrium'})")
+    print(f"  Time-Series Momentum      : {comp_row['tsmom_alpha']:+.2f} (Realized Vol: {comp_row['tsmom_realized_vol']*100:.1f}%)")
+    print(f"  Cross-Asset Commodity Lead: {comp_row['cross_asset_alpha']:+.2f} (Sugar/Aluminum/Oil margin pressure)")
+    print(f"  ML Multi-Paradigm Edge    : {decision.get('probability_outperform', 0.5):.4f} (5-Model Consensus)")
+    if "submodel_probs" in decision:
+        p_sub = decision["submodel_probs"]
+        print(f"    • LightGBM: {p_sub.get('lightgbm', 0):.3f} | CatBoost: {p_sub.get('catboost', 0):.3f} | XGBoost: {p_sub.get('xgboost', 0):.3f}")
+        print(f"    • Deep ResNet: {p_sub.get('neural_machine', 0):.3f} | Ridge (C=0.01): {p_sub.get('ridge', 0):.3f}")
+    print(f"  Composite Alpha Score     : {comp_row['composite_alpha']:+.3f}")
+    print(f"  Recommended Composite Action: {comp_row['action']}")
+    print(f"  Composite Target Weight   : {comp_row['composite_weight'] * 100.0:.1f}%")
     print("=" * 70)
 
 

@@ -6,7 +6,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C.svg?style=for-the-badge&logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![Tree Ensembles: LightGBM | CatBoost | XGBoost](https://img.shields.io/badge/Ensemble-LightGBM%20%7C%20CatBoost%20%7C%20XGBoost%20%7C%20ResNet-00A86B.svg?style=for-the-badge)]()
 [![Validation: Purged Walk-Forward & CPCV](https://img.shields.io/badge/Validation-Purged%20%26%20Embargoed%20CPCV-FF8C00.svg?style=for-the-badge)]()
-[![Tests: 13/13 Passing](https://img.shields.io/badge/Tests-13%2F13%20Passed-28A745.svg?style=for-the-badge&logo=pytest&logoColor=white)]()
+[![Tests: 19/19 Passing](https://img.shields.io/badge/Tests-19%2F19%20Passed-28A745.svg?style=for-the-badge&logo=pytest&logoColor=white)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
 **A hedge-fund caliber systematic quantitative trading engine engineered specifically for Coca-Cola ($KO). Ingests 217+ multi-asset macroeconomic, commodity input cost, packaging supplier, bottler distribution, and competitor microstructure features with zero forward-looking data leakage.**
@@ -131,13 +131,61 @@ graph TD
     Dense4 --> Head2["Head 2: Expected Alpha<br/>Huber Loss (δ=0.01)<br/>Continuous 5d Return %"]
     Dense4 --> Head3["Head 3: Predictive Volatility<br/>Softplus Activation<br/>Variance σ² Heteroskedasticity"]
 
-    Head1 --> Ensemble["Institutional Ensemble Blending Engine"]
-    LGBM["LightGBM Classifier (35%)<br/>Tree-Based Non-Linear Splits"] --> Ensemble
-    Ridge["Ridge Logistic (15%)<br/>L2 Shrinkage C=0.01"] --> Ensemble
+    Head1 --> Ensemble["5-Model Institutional Multi-Paradigm Ensemble"]
+    LGBM["LightGBM (30%)<br/>Leaf-wise Non-linear Splits"] --> Ensemble
+    CB["CatBoost (25%)<br/>Ordered Oblivious Trees"] --> Ensemble
+    XGB["XGBoost (20%)<br/>Depth-wise L1/L2 Regularized"] --> Ensemble
+    Ridge["Ridge Logistic (10%)<br/>L2 Shrinkage C=0.01"] --> Ensemble
     
-    Ensemble --> Tilt["Active Benchmark Tilt Sizing Engine<br/>tilt = (p - 0.50) / 0.08<br/>Weight = clip(0.50 + tilt * 0.50, 0.0, 1.0)"]
+    Ensemble --> Tilt["Risk-Parity Conviction Sizing Engine<br/>tilt = (p - 0.50) / 0.08<br/>Weight = clip(0.60 + tilt * 0.70, 0.0, 1.35)"]
     Tilt --> Decision["Actionable Session Trade Order"]
 ```
+
+---
+
+## 🏛️ Institutional Quantitative Strategy Suite (`src/strategies/`)
+
+To operate on par with premier multi-strategy hedge fund platforms (Citadel, Millennium, AQR, Two Sigma, WorldQuant), this repository houses 6 dedicated quantitative strategy engines:
+
+```mermaid
+flowchart TD
+    subgraph Quant_Engines["Canonical Institutional Strategy Families"]
+        S1["1. Statistical Arbitrage<br/>(Kalman Filter Cointegration Pairs)<br/>• Mean-reversion on KO/PEP, KO/XLP, KO/COKE<br/>• Real-time recursive innovation z-score"]
+        S2["2. Time-Series Momentum (TSMOM)<br/>(AQR / Man AHL Trend Following)<br/>• Multi-horizon 5d, 21d, 63d trend filters<br/>• Volatility-targeted risk parity scaling"]
+        S3["3. Cross-Asset Supply Chain Lead-Lag<br/>(Two Sigma Commodity Spillover)<br/>• Sugar CANE, Aluminum DBB, Crude USO cost shock<br/>• Bottler order flow COKE/KOF margin leads"]
+        S4["4. Macro Factor Regime Allocation<br/>(Bridgewater Macro Sensitivity)<br/>• Bond-proxy yield curve sensitivity TLT<br/>• FX USD headwind UUP & Flight-to-Safety SPY"]
+        S5["5. Triple Barrier & Meta-Labeling<br/>(Marcos López de Prado AFML)<br/>• Volatility-adjusted take-profit & stop-loss<br/>• Secondary trade quality filter & bet sizing"]
+    end
+
+    S1 --> Combiner["Multi-Strategy Alpha Combiner<br/>• Inverse-variance risk weighting<br/>• Macro regime conditioning<br/>• 4.5% risk-free cash sweep yield"]
+    S2 --> Combiner
+    S3 --> Combiner
+    S4 --> Combiner
+    S5 --> Combiner
+    ML["6. Multi-Paradigm ML Ensemble<br/>(LightGBM + CatBoost + XGBoost + ResNet + Ridge)"] --> Combiner
+
+    Combiner --> Exec["Unified Portfolio Allocation Order (0.0x - 1.35x)"]
+```
+
+### Strategy Engines Breakdown
+
+1. **Statistical Arbitrage (`src/strategies/stat_arb.py`)**:
+   - Implements an online recursive 2D **Kalman Filter** state space model updating time-varying hedge ratios ($\beta_t$) and cointegration intercepts ($\alpha_t$) against economic peers ($PEP, XLP, COKE$).
+   - Standardizes recursive innovation errors into rolling $Z$-scores ($e_t / \sqrt{Q_t}$), entering long when the spread is oversold ($Z \le -1.75$) and trimming when overbought ($Z \ge +1.75$).
+2. **Time-Series Momentum (`src/strategies/momentum.py`)**:
+   - Implements Moskowitz, Ooi, Pedersen (2012) multi-horizon trend following.
+   - Combines 15-session (5d), 63-session (21d), and 189-session (63d) exponential moving averages, scaled inversely by realized volatility ($\sigma^* / \hat{\sigma}_t$).
+3. **Cross-Asset Supply Chain Lead-Lag (`src/strategies/cross_asset_lead_lag.py`)**:
+   - Measures multi-week input commodity shocks across Sugar (`$CANE`), Base Metals/Aluminum (`$DBB`), and Crude Oil (`$USO`).
+   - Tracks leading order flow divergence from independent bottling anchors (`$COKE, $KOF`).
+4. **Macro Factor Regime Allocation (`src/strategies/macro_regime.py`)**:
+   - Classifies macro market states: `DEFENSIVE_FLIGHT_TO_SAFETY`, `STAGFLATION_RATES_SHOCK`, `RISK_ON_GROWTH_EXPANSION`.
+   - Adjusts position sizing according to discount rate yield curve competition (`$TLT$) and foreign exchange revenue translation drag (`$UUP$).
+5. **Marcos López de Prado Triple Barrier & Meta-Labeling (`src/strategies/meta_labeling.py`)**:
+   - Replaces fixed-horizon labels with dynamic volatility-adjusted profit-taking ($+2.0\sigma$), stop-loss ($-1.5\sigma$), and time expiration barriers (15 bars).
+   - Trains secondary meta-models to filter false-positive directional bets and calibrate trade sizing.
+6. **Multi-Strategy Alpha Combiner (`src/strategies/combiner.py`)**:
+   - Fuses all alpha streams using inverse-variance risk weighting, macro regime multipliers, and unallocated cash interest sweeping ($r_f = 4.5\%$).
 
 ---
 
