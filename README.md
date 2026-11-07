@@ -2,8 +2,9 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Framework: LightGBM](https://img.shields.io/badge/ML-LightGBM-brightgreen.svg)](https://lightgbm.readthedocs.io/)
-[![Backtest: Purged Walk--Forward](https://img.shields.io/badge/Validation-Purged%20Walk--Forward-orange.svg)]()
+[![Framework: PyTorch & LightGBM](https://img.shields.io/badge/ML-PyTorch%20%7C%20LightGBM%20%7C%20Ensemble-red.svg)](https://pytorch.org/)
+[![Architecture: Deep Tabular ResNet (1400+ Neurons)](https://img.shields.io/badge/Architecture-Deep%20Tabular%20ResNet%20%281400%2B%20Neurons%29-purple.svg)]()
+[![Backtest: Purged Walk--Forward & CPCV](https://img.shields.io/badge/Validation-Purged%20Walk--Forward%20%26%20CPCV-orange.svg)]()
 
 A quantitative research and systematic trading framework designed to trade **Coca-Cola ($KO)** by leveraging cross-sectional signals, statistical arbitrage, and lead-lag dynamics across competitors, upstream packaging suppliers, bottlers, and sector proxies.
 
@@ -87,14 +88,15 @@ coca-cola-ml-trading/
 │   └── default_config.yaml     # Strategy hyperparameters, universe, and risk settings
 ├── src/
 │   ├── data/
-│   │   ├── universe.py         # Multi-asset universe definitions
+│   │   ├── universe.py         # Multi-asset universe definitions (competitors, commodities, rates, FX)
 │   │   └── loader.py           # Historical data fetcher, parquet cache, and aligner
 │   ├── features/
-│   │   ├── engineer.py         # Cross-asset momentum, cointegration spreads, PCA & lead-lags
+│   │   ├── engineer.py         # 110+ Cross-asset features (input costs, spreads, RSI, PCA)
 │   │   └── labeling.py         # Forward relative alpha & Triple Barrier labeling
 │   ├── models/
-│   │   ├── cross_val.py        # Purged & Embargoed Walk-Forward CV splitter
-│   │   ├── trainer.py          # LightGBM / Ridge trainer with out-of-fold inference
+│   │   ├── cross_val.py        # Purged & Embargoed Walk-Forward CV & Combinatorial Purged CV (CPCV)
+│   │   ├── neural_net.py       # DeepQuantNet Tabular ResNet (1400+ neurons) & Ensemble Classifier
+│   │   ├── trainer.py          # Multi-architecture production trainer & walk-forward CV
 │   │   └── evaluator.py        # Financial ML metrics (AUC, Brier score, Spearman IC)
 │   ├── backtest/
 │   │   ├── engine.py           # Vectorized backtester with costs and execution lag
@@ -102,7 +104,9 @@ coca-cola-ml-trading/
 │   └── pipeline.py             # End-to-end research and backtesting pipeline
 ├── tests/
 │   ├── test_features.py        # Feature stability and shape verification
-│   └── test_backtest.py        # Execution lag and accounting unit tests
+│   ├── test_backtest.py        # Execution lag and accounting unit tests
+│   ├── test_model_pipeline.py  # DeepQuantNet & Ensemble fit, save, and predict tests
+│   └── test_leakage.py         # 5 rigorous zero-data-leakage verification tests
 ├── run_backtest.py             # Executable CLI entrypoint
 ├── requirements.txt            # Python dependencies
 ├── pyproject.toml              # Build system and package configuration

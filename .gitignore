@@ -42,6 +42,8 @@ data/cache/
 results/
 reports/figures/
 *.log
+models/*.joblib
+models/*.pt
 
 # Pytest
 .pytest_cache/

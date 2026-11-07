@@ -6,16 +6,34 @@ universe:
     - "KDP"   # Keurig Dr Pepper (sodas, juices, coffee)
     - "MNST"  # Monster Beverage (energy drinks, KO distribution partner)
     - "CELH"  # Celsius Holdings (growth peer in functional energy)
+  staples_peers:
+    - "PG"    # Procter & Gamble (mega-cap consumer staples anchor)
+    - "MDLZ"  # Mondelez International (global snacking & confectionery)
+    - "KMB"   # Kimberly-Clark (defensive consumer packaged goods)
+    - "GIS"   # General Mills (food & staples)
+    - "CL"    # Colgate-Palmolive (household & personal care)
   bottlers:
     - "COKE"  # Coca-Cola Consolidated (largest independent US bottler)
     - "KOF"   # Coca-Cola FEMSA (Latin American anchor bottler)
   suppliers:
-    - "BALL"  # Ball Corporation (aluminum beverage packaging)
+    - "BALL"  # Ball Corporation (aluminum beverage cans & packaging)
     - "CCK"   # Crown Holdings (packaging & beverage cans)
+  commodities:
+    - "CANE"  # Teucrium Sugar Fund (primary sweetener raw material)
+    - "DBA"   # Invesco DB Agriculture Fund (corn syrup / ag commodities)
+    - "USO"   # United States Oil Fund (freight, logistics & PET resin costs)
+    - "DBB"   # Invesco DB Base Metals (aluminum input pricing)
+  rates_and_credit:
+    - "TLT"   # 20+ Year Treasury Bond ETF (bond-proxy yield sensitivity)
+    - "IEF"   # 7-10 Year Treasury Bond ETF (benchmark intermediate duration)
+    - "HYG"   # iShares High Yield Corporate Bond (credit risk appetite)
+    - "LQD"   # iShares Investment Grade Corporate Bond (corporate borrowing conditions)
   macro_and_sector:
     - "XLP"   # Consumer Staples Select Sector SPDR (sector benchmark)
-    - "SPY"   # S&P 500 ETF (broad market risk premium)
-    - "UUP"   # Invesco DB US Dollar Index (FX exposure for global revenues)
+    - "SPY"   # S&P 500 ETF (broad market equity risk premium)
+    - "UUP"   # Invesco DB US Dollar Index (FX exposure for 65%+ global revenue)
+    - "EEM"   # iShares MSCI Emerging Markets ETF (international growth engine)
+    - "VIXY"  # ProShares VIX Short-Term Futures (market risk / flight to safety)
 
 data:
   start_date: "2019-01-01"
@@ -25,10 +43,12 @@ data:
 
 features:
   rolling_windows: [5, 10, 21, 63] # 1w, 2w, 1m, 1q
-  lead_lag_lags: [1, 2, 3]         # Prior days competitor return leads
+  lead_lag_lags: [1, 2, 3]         # Prior days competitor & macro return leads
   cointegration_pairs:
     - ["KO", "PEP"]
     - ["KO", "XLP"]
+    - ["KO", "COKE"]
+    - ["KO", "TLT"]
   pca:
     enabled: true
     n_components: 3
@@ -39,14 +59,44 @@ labeling:
   neutral_threshold: 0.0015        # +/- 15 bps buffer to filter noise
 
 model:
-  type: "lightgbm"                 # "lightgbm" or "ridge"
+  type: "ensemble"                 # "ensemble", "neural_network", "lightgbm", or "ridge"
   cv:
     n_splits: 5
     purge_window: 5                # Purge overlapping forward-looking label windows
     embargo_pct: 0.01              # Embargo fold borders
-  hyperparameters:
+  ensemble:
+    neural_weight: 0.50            # 50% Deep Neural Network
+    lgbm_weight: 0.35              # 35% LightGBM
+    ridge_weight: 0.15             # 15% Ridge
+  neural_network:
+    hidden_dims: [512, 512, 256, 128, 64] # 1,472 neurons deep tabular architecture
+    dropout: 0.30
+    learning_rate: 0.001
+    weight_decay: 0.0001
+    epochs: 75
+    batch_size: 64
+    early_stopping_patience: 12
+    random_state: 42
+  lightgbm:
     n_estimators: 150
     learning_rate: 0.03
+    max_depth: 4
+    num_leaves: 15
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_alpha: 0.1
+    reg_lambda: 1.0
+    random_state: 42
+  hyperparameters:
+    # Fallback hyperparameters if single model type is selected
+    hidden_dims: [512, 512, 256, 128, 64]
+    dropout: 0.30
+    learning_rate: 0.001
+    weight_decay: 0.0001
+    epochs: 75
+    batch_size: 64
+    early_stopping_patience: 12
+    n_estimators: 150
     max_depth: 4
     num_leaves: 15
     subsample: 0.8

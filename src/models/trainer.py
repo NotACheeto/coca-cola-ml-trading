@@ -25,7 +25,29 @@ class ModelTrainer:
 
     def _get_base_estimator(self):
         """Constructs base model based on configuration."""
-        if self.model_type == "lightgbm":
+        if self.model_type in ["neural_network", "deep_quant_net", "mlp"]:
+            from src.models.neural_net import PyTorchNeuralNetClassifier
+            return PyTorchNeuralNetClassifier(
+                hidden_dims=self.hyperparams.get("hidden_dims", [512, 512, 256, 128, 64]),
+                dropout=self.hyperparams.get("dropout", 0.30),
+                learning_rate=self.hyperparams.get("learning_rate", 0.001),
+                weight_decay=self.hyperparams.get("weight_decay", 0.0001),
+                epochs=self.hyperparams.get("epochs", 80),
+                batch_size=self.hyperparams.get("batch_size", 64),
+                early_stopping_patience=self.hyperparams.get("early_stopping_patience", 12),
+                random_state=self.hyperparams.get("random_state", 42),
+            )
+        elif self.model_type == "ensemble":
+            from src.models.neural_net import EnsembleQuantClassifier
+            ensemble_cfg = self.config.get("model", {}).get("ensemble", {})
+            return EnsembleQuantClassifier(
+                neural_weight=ensemble_cfg.get("neural_weight", 0.50),
+                lgbm_weight=ensemble_cfg.get("lgbm_weight", 0.35),
+                ridge_weight=ensemble_cfg.get("ridge_weight", 0.15),
+                nn_params=self.config.get("model", {}).get("neural_network", {}),
+                lgbm_params=self.config.get("model", {}).get("lightgbm", {}),
+            )
+        elif self.model_type == "lightgbm":
             return lgb.LGBMClassifier(
                 n_estimators=self.hyperparams.get("n_estimators", 150),
                 learning_rate=self.hyperparams.get("learning_rate", 0.03),

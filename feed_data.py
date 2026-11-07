@@ -61,7 +61,7 @@ def feed_and_update(
         universe=universe,
         rolling_windows=feat_cfg.get("rolling_windows", [5, 10, 21, 63]),
         lead_lag_lags=feat_cfg.get("lead_lag_lags", [1, 2, 3]),
-        cointegration_pairs=feat_cfg.get("cointegration_pairs", [["KO", "PEP"], ["KO", "XLP"]]),
+        cointegration_pairs=feat_cfg.get("cointegration_pairs", [["KO", "PEP"], ["KO", "XLP"], ["KO", "COKE"], ["KO", "TLT"]]),
         pca_components=feat_cfg.get("pca", {}).get("n_components", 3),
     )
     X = engineer.compute_features(prices)

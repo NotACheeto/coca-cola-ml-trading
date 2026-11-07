@@ -79,17 +79,30 @@ class DataLoader:
             # Clean and align data
             adj_close = adj_close.sort_index()
             adj_close = adj_close.ffill().bfill()
-            adj_close = adj_close.dropna(subset=[self.universe.target])
+            if self.universe.target in adj_close.columns:
+                adj_close = adj_close.dropna(subset=[self.universe.target])
 
-            if self.start_date:
-                adj_close = adj_close[adj_close.index >= pd.to_datetime(self.start_date)]
-            if self.end_date:
-                adj_close = adj_close[adj_close.index <= pd.to_datetime(self.end_date)]
-
+            # Preserve master cache: combine with existing historical data if present
             if cache_file:
-                adj_close.to_parquet(cache_file)
+                if cache_file.exists():
+                    try:
+                        cached_master = pd.read_parquet(cache_file)
+                        combined_master = adj_close.combine_first(cached_master).sort_index()
+                        combined_master = combined_master[~combined_master.index.duplicated(keep="last")]
+                        combined_master.to_parquet(cache_file)
+                    except Exception:
+                        adj_close.to_parquet(cache_file)
+                else:
+                    adj_close.to_parquet(cache_file)
 
-            return adj_close
+            # Return requested window
+            out_df = adj_close.copy()
+            if self.start_date:
+                out_df = out_df[out_df.index >= pd.to_datetime(self.start_date)]
+            if self.end_date:
+                out_df = out_df[out_df.index <= pd.to_datetime(self.end_date)]
+
+            return out_df
 
         except Exception as e:
             # Fallback for offline testing or rate-limits: generate realistic synthetic series
@@ -99,47 +112,68 @@ class DataLoader:
     def _generate_synthetic_data(self, n_days: int = 1500) -> pd.DataFrame:
         """
         Generates realistic co-moving geometric Brownian motion series with cointegration
-        and sector correlation for local testing.
+        and cross-asset correlation across equities, commodities, and rates.
         """
         rng = np.random.default_rng(42)
         dates = pd.date_range(end=pd.Timestamp.now().normalize(), periods=n_days, freq="B")
-        
-        # Latent factor: Macro Consumer Staples factor
-        macro_shocks = rng.normal(0.0003, 0.008, n_days)
-        
+
+        # Latent macro factors
+        macro_staples = rng.normal(0.0003, 0.007, n_days)
+        interest_rate_shock = rng.normal(0.0001, 0.005, n_days)
+        commodity_shock = rng.normal(0.0002, 0.012, n_days)
+
         data = {}
         for ticker in self.universe.all_tickers:
-            # Beta to macro factor
+            # Calibrate factor sensitivities
             if ticker in ["KO", "PEP"]:
-                beta = 0.95
-                idio_vol = 0.007
+                returns = 0.90 * macro_staples - 0.25 * interest_rate_shock + rng.normal(0, 0.006, n_days)
+                p0 = 50.0 if ticker == "KO" else 165.0
             elif ticker in ["MNST", "CELH"]:
-                beta = 1.2
-                idio_vol = 0.018
+                returns = 1.20 * macro_staples + rng.normal(0, 0.018, n_days)
+                p0 = 55.0 if ticker == "MNST" else 40.0
+            elif ticker in ["COKE", "KOF"]:
+                returns = 0.85 * macro_staples + rng.normal(0, 0.010, n_days)
+                p0 = 800.0 if ticker == "COKE" else 90.0
+            elif ticker in ["BALL", "CCK"]:
+                returns = 0.70 * macro_staples + 0.35 * commodity_shock + rng.normal(0, 0.012, n_days)
+                p0 = 60.0
+            elif ticker in ["CANE", "DBA", "USO", "DBB"]:
+                returns = 0.95 * commodity_shock + rng.normal(0, 0.010, n_days)
+                p0 = 12.0 if ticker == "CANE" else 22.0
+            elif ticker in ["TLT", "IEF"]:
+                returns = -1.2 * interest_rate_shock + rng.normal(0, 0.004, n_days)
+                p0 = 95.0
+            elif ticker in ["HYG", "LQD"]:
+                returns = 0.40 * macro_staples - 0.50 * interest_rate_shock + rng.normal(0, 0.003, n_days)
+                p0 = 75.0 if ticker == "HYG" else 105.0
             elif ticker == "XLP":
-                beta = 1.0
-                idio_vol = 0.003
+                returns = 1.0 * macro_staples + rng.normal(0, 0.003, n_days)
+                p0 = 75.0
+            elif ticker == "UUP":
+                returns = -0.30 * macro_staples + 0.30 * interest_rate_shock + rng.normal(0, 0.004, n_days)
+                p0 = 28.0
             else:
-                beta = 0.85
-                idio_vol = 0.010
-                
-            idio_shocks = rng.normal(0, idio_vol, n_days)
-            returns = beta * macro_shocks + idio_shocks
-            
-            # Start price
-            p0 = 50.0 if ticker == "KO" else (160.0 if ticker == "PEP" else 75.0)
-            price_path = p0 * np.exp(np.cumsum(returns))
-            data[ticker] = price_path
+                # Other peers (PG, MDLZ, KMB, GIS, CL, SPY, EEM, VIXY)
+                returns = 0.85 * macro_staples + rng.normal(0, 0.008, n_days)
+                p0 = 80.0
+
+            data[ticker] = p0 * np.exp(np.cumsum(returns))
 
         df = pd.DataFrame(data, index=dates)
         return df
 
     def save_prices(self, df: pd.DataFrame) -> Path:
-        """Saves price matrix to disk cache."""
+        """Saves price matrix to disk cache, merging with existing data."""
         if not self.cache_dir:
             self.cache_dir = Path("data/cache")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         cache_file = self.cache_dir / "prices_cache.parquet"
+        if cache_file.exists():
+            try:
+                old_df = pd.read_parquet(cache_file)
+                df = df.combine_first(old_df).sort_index()
+            except Exception:
+                pass
         df.to_parquet(cache_file)
         return cache_file
 
