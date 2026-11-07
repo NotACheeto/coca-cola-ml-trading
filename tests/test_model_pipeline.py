@@ -126,9 +126,11 @@ def test_ensemble_model_fit_save_and_predict(tmp_path):
         "model": {
             "type": "ensemble",
             "ensemble": {
-                "neural_weight": 0.50,
-                "lgbm_weight": 0.35,
-                "ridge_weight": 0.15,
+                "lgbm_weight": 0.30,
+                "catboost_weight": 0.25,
+                "xgboost_weight": 0.20,
+                "neural_weight": 0.15,
+                "ridge_weight": 0.10,
             },
             "neural_network": {
                 "hidden_dims": [64, 32],
@@ -139,6 +141,16 @@ def test_ensemble_model_fit_save_and_predict(tmp_path):
             "lightgbm": {
                 "n_estimators": 10,
                 "random_state": 42,
+            },
+            "catboost": {
+                "iterations": 10,
+                "random_seed": 42,
+                "verbose": 0,
+            },
+            "xgboost": {
+                "n_estimators": 10,
+                "random_state": 42,
+                "eval_metric": "logloss",
             },
         }
     }

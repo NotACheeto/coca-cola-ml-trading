@@ -91,6 +91,9 @@ def test_out_of_sample(
         initial_capital=bt_cfg.get("initial_capital", 100000.0),
         transaction_cost_bps=bt_cfg.get("transaction_cost_bps", 5.0),
         position_sizing=bt_cfg.get("position_sizing", "confidence_weighted"),
+        max_leverage=bt_cfg.get("max_leverage", 1.35),
+        risk_free_rate=bt_cfg.get("risk_free_rate", 0.045),
+        periods_per_year=bt_cfg.get("periods_per_year", 756),
     )
     backtest_results = engine.run(
         prices=prices,

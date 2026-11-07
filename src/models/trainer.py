@@ -41,11 +41,15 @@ class ModelTrainer:
             from src.models.neural_net import EnsembleQuantClassifier
             ensemble_cfg = self.config.get("model", {}).get("ensemble", {})
             return EnsembleQuantClassifier(
-                neural_weight=ensemble_cfg.get("neural_weight", 0.50),
-                lgbm_weight=ensemble_cfg.get("lgbm_weight", 0.35),
-                ridge_weight=ensemble_cfg.get("ridge_weight", 0.15),
+                lgbm_weight=ensemble_cfg.get("lgbm_weight", 0.30),
+                catboost_weight=ensemble_cfg.get("catboost_weight", 0.25),
+                xgboost_weight=ensemble_cfg.get("xgboost_weight", 0.20),
+                neural_weight=ensemble_cfg.get("neural_weight", 0.15),
+                ridge_weight=ensemble_cfg.get("ridge_weight", 0.10),
                 nn_params=self.config.get("model", {}).get("neural_network", {}),
                 lgbm_params=self.config.get("model", {}).get("lightgbm", {}),
+                catboost_params=self.config.get("model", {}).get("catboost", {}),
+                xgboost_params=self.config.get("model", {}).get("xgboost", {}),
             )
         elif self.model_type == "lightgbm":
             return lgb.LGBMClassifier(

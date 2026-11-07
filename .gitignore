@@ -44,6 +44,7 @@ reports/figures/
 *.log
 models/*.joblib
 models/*.pt
+catboost_info/
 
 # Pytest
 .pytest_cache/

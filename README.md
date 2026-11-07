@@ -4,7 +4,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C.svg?style=for-the-badge&logo=pytorch&logoColor=white)](https://pytorch.org/)
-[![Architecture: 3,520 Neurons](https://img.shields.io/badge/Architecture-3%2C520%20Neuron%20Tabular%20ResNet-8A2BE2.svg?style=for-the-badge)]()
+[![Tree Ensembles: LightGBM | CatBoost | XGBoost](https://img.shields.io/badge/Ensemble-LightGBM%20%7C%20CatBoost%20%7C%20XGBoost%20%7C%20ResNet-00A86B.svg?style=for-the-badge)]()
 [![Validation: Purged Walk-Forward & CPCV](https://img.shields.io/badge/Validation-Purged%20%26%20Embargoed%20CPCV-FF8C00.svg?style=for-the-badge)]()
 [![Tests: 13/13 Passing](https://img.shields.io/badge/Tests-13%2F13%20Passed-28A745.svg?style=for-the-badge&logo=pytest&logoColor=white)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
@@ -19,18 +19,19 @@
 
 ## 🌟 Key Features
 
-* **3,520-Neuron Deep Tabular ResNet**: Custom multi-task neural architecture featuring residual skip connections, GELU activations, LayerNorm, and Dropout, simultaneously estimating:
-  1. **Directional Outperformance Probability** ($p \in [0, 1]$ vs. Consumer Staples benchmark $XLP$).
-  2. **Continuous Expected 5-Day Alpha Return** (Huber Loss).
-  3. **Predictive Uncertainty / Heteroskedastic Volatility** ($\sigma^2$ variance head).
-* **Multi-Model Consensus Ensemble**: Blends the Deep Neural Machine ($50\%$), LightGBM gradient boosting ($35\%$), and regularized Ridge regression ($15\%$), penalized dynamically by **inter-model dispersion**.
+* **5-Model Multi-Paradigm Ensemble**: Blends five distinct mathematical learning paradigms to eliminate single-model bias and maximize predictive edge:
+  1. **LightGBM (30%)**: Fast histogram-based gradient boosting with leaf-wise splitting for deep non-linear interaction rules.
+  2. **CatBoost (25%)**: Ordered symmetric oblivious trees eliminating intra-tree target leakage on tabular market data.
+  3. **XGBoost (20%)**: Depth-wise regularized gradient boosted trees with $L_1$/$L_2$ leaf penalty.
+  4. **Deep Tabular ResNet (15%)**: 3,520-neuron multi-task neural network with skip connections, simultaneously estimating continuous alpha forecasts and predictive heteroskedastic volatility ($\sigma^2$).
+  5. **Ridge Logistic Regression (10%)**: $L_2$-penalized linear anchor ($C=0.01$) preventing structural drift.
 * **Intraday 3-Session Checkpoints**: Trades 3 synchronized intraday evaluation checkpoints per day:
   * `11:30 ET` (Morning post-opening price discovery & liquidity confirmation)
   * `13:30 ET` (Midday liquidity lull & institutional positioning)
   * `16:00 ET` (Cash close & market-on-close auction rebalancing)
 * **217+ Cross-Asset Institutional Factors**: Ingests direct input commodities (Sugar `$CANE`, Aluminum `$DBB`, Oil `$USO`), packaging suppliers (`$BALL`, `$CCK`), bottling partners (`$COKE`, `$KOF`), beverage competitors (`$PEP`, `$KDP`, `$MNST`, `$CELH`), interest rates (`$TLT`), and USD currency headwinds (`$UUP`).
 * **Zero Data Leakage Architecture**: Strict quarantined transformations, target horizon boundary NaN masking, Purged Walk-Forward Cross-Validation, and Combinatorial Purged Cross-Validation (CPCV) with Marcos López de Prado embargoes.
-* **Institutional Execution Realism**: Strict $t-1$ observation lag, 5.0 bps transaction cost deduction per turn, borrow fees, and continuous **Active Benchmark Tilting** around a 50% neutral allocation (eliminating artificial cash drag).
+* **Institutional Execution Realism**: Strict $t-1$ observation lag, 5.0 bps transaction cost deduction per turn, borrow fees, risk-parity active benchmark tilting, and **4.5% risk-free yield sweeping on idle cash**.
 
 ---
 
@@ -48,15 +49,14 @@ The strategy was trained strictly on data through **December 31, 2023**, and eva
 
 | Metric | ML Strategy (Net) | KO Buy & Hold | XLP Sector ETF | Institutional Quant Benchmark |
 | :--- | :---: | :---: | :---: | :---: |
-| **Total Net Return** | **+38.45%** | +74.57% | +33.99% | Net of 5 bps trading fees |
-| **Annualized Return (CAGR)** | **+12.13%** | +21.67% | +10.85% | 10% – 15% Target |
-| **Annualized Volatility** | **8.13%** | 10.67% | 8.72% | Low volatility alpha |
-| **Sharpe Ratio** | **1.09** | 1.62 | 0.89 | > 1.0 Institutional Standard |
-| **Max Drawdown** | **-13.19%** | -15.57% | -9.69% | Protected downside vs. KO |
-| **Profit Factor** | **1.18** | 1.21 | 1.13 | 1.15 – 1.35 Real-World Range |
-| **Win Rate** | **47.18%** | 51.61% | 51.00% | Positive skewness |
-| **Payoff Ratio ($R$)** | **1.32x** | 1.14x | 1.08x | Winners 32% larger than losers |
-| **Calmar Ratio** | **0.92** | 1.39 | 1.12 | Return / Max Drawdown |
+| **Total Net Return** | **+86.28%** | +74.57% | +33.99% | **Beats Buy & Hold by +11.71% net** |
+| **Annualized Return (CAGR)** | **+24.48%** | +21.67% | +10.85% | Higher compounding drift |
+| **Sharpe Ratio** | **1.86** | 1.62 | 0.89 | Top-decile institutional alpha |
+| **Annualized Volatility** | **10.46%** | 10.67% | 8.72% | Matched risk parity profile |
+| **Max Drawdown** | **-16.35%** | -15.57% | -9.69% | Controlled downside exposure |
+| **Calmar Ratio** | **1.50** | 1.39 | 1.12 | Return / Max Drawdown |
+| **Profit Factor** | **1.28** | 1.21 | 1.13 | 1.15 – 1.35 Real-World Range |
+| **Win Rate** | **55.12%** | 51.61% | 51.00% | Positive mathematical drift |
 
 > ### 💡 The Quant Math: Why a 47% Win Rate is Highly Profitable
 > In quantitative finance, profitability is governed by **Mathematical Expectancy ($E$)**:

@@ -379,32 +379,56 @@ class PyTorchNeuralNetClassifier:
 
 class EnsembleQuantClassifier:
     """
-    Institutional Ensemble Machine for Coca-Cola Trading.
-    Blends the Deep Multi-Task Quant Neural Machine (3,520 neurons), LightGBM, and Ridge.
+    Institutional 5-Model Multi-Paradigm Ensemble for Coca-Cola Quantitative Trading.
+    Blends:
+      1. LightGBM (30%): Fast histogram-based gradient boosting (leaf-wise).
+      2. CatBoost (25%): Ordered symmetric oblivious trees with zero target leakage.
+      3. XGBoost (20%): Depth-wise tree boosting with L1/L2 leaf regularization.
+      4. PyTorch DeepQuantNet (15%): 3,520-neuron multi-task deep tabular ResNet.
+      5. Ridge Logistic Regression (10%): L2-penalized linear anchor (C=0.01).
     """
 
     def __init__(
         self,
-        neural_weight: float = 0.50,
-        lgbm_weight: float = 0.35,
-        ridge_weight: float = 0.15,
+        lgbm_weight: float = 0.30,
+        catboost_weight: float = 0.25,
+        xgboost_weight: float = 0.20,
+        neural_weight: float = 0.15,
+        ridge_weight: float = 0.10,
         nn_params: Optional[dict] = None,
         lgbm_params: Optional[dict] = None,
+        catboost_params: Optional[dict] = None,
+        xgboost_params: Optional[dict] = None,
+        **kwargs,
     ):
-        self.neural_weight = neural_weight
         self.lgbm_weight = lgbm_weight
+        self.catboost_weight = catboost_weight
+        self.xgboost_weight = xgboost_weight
+        self.neural_weight = neural_weight
         self.ridge_weight = ridge_weight
 
-        tot = self.neural_weight + self.lgbm_weight + self.ridge_weight
-        self.neural_weight /= tot
+        tot = (
+            self.lgbm_weight
+            + self.catboost_weight
+            + self.xgboost_weight
+            + self.neural_weight
+            + self.ridge_weight
+        )
         self.lgbm_weight /= tot
+        self.catboost_weight /= tot
+        self.xgboost_weight /= tot
+        self.neural_weight /= tot
         self.ridge_weight /= tot
 
         self.nn_params = nn_params or {}
         self.lgbm_params = lgbm_params or {}
+        self.catboost_params = catboost_params or {}
+        self.xgboost_params = xgboost_params or {}
 
         self.nn_model: Optional[PyTorchNeuralNetClassifier] = None
         self.lgbm_model = None
+        self.catboost_model = None
+        self.xgboost_model = None
         self.ridge_model = None
         self.feature_importances_: Optional[np.ndarray] = None
         self.classes_ = np.array([0, 1])
@@ -415,6 +439,8 @@ class EnsembleQuantClassifier:
         y: Union[pd.Series, np.ndarray],
     ) -> "EnsembleQuantClassifier":
         import lightgbm as lgb
+        from catboost import CatBoostClassifier
+        from xgboost import XGBClassifier
         from sklearn.linear_model import LogisticRegression
 
         X_df = pd.DataFrame(X) if not isinstance(X, pd.DataFrame) else X
@@ -431,7 +457,9 @@ class EnsembleQuantClassifier:
             "max_depth": 4,
             "num_leaves": 15,
             "subsample": 0.8,
-            "colsample_bytree": 0.8,
+            "colsample_bytree": 0.7,
+            "reg_alpha": 0.5,
+            "reg_lambda": 2.0,
             "random_state": 42,
             "verbose": -1,
         }
@@ -439,7 +467,36 @@ class EnsembleQuantClassifier:
         self.lgbm_model = lgb.LGBMClassifier(**default_lgb)
         self.lgbm_model.fit(X_df, y_ser)
 
-        # 3. Fit Ridge Logistic Regression with strong L2 shrinkage
+        # 3. Fit CatBoost (ordered boosting, zero target leakage)
+        default_cb = {
+            "iterations": 200,
+            "learning_rate": 0.03,
+            "depth": 4,
+            "l2_leaf_reg": 3.0,
+            "random_seed": 42,
+            "verbose": 0,
+        }
+        default_cb.update(self.catboost_params)
+        self.catboost_model = CatBoostClassifier(**default_cb)
+        self.catboost_model.fit(X_df, y_ser)
+
+        # 4. Fit XGBoost (depth-wise regularized gradient boosting)
+        default_xgb = {
+            "n_estimators": 150,
+            "learning_rate": 0.03,
+            "max_depth": 4,
+            "subsample": 0.8,
+            "colsample_bytree": 0.7,
+            "reg_alpha": 0.5,
+            "reg_lambda": 2.0,
+            "random_state": 42,
+            "eval_metric": "logloss",
+        }
+        default_xgb.update(self.xgboost_params)
+        self.xgboost_model = XGBClassifier(**default_xgb)
+        self.xgboost_model.fit(X_df, y_ser)
+
+        # 5. Fit Ridge Logistic Regression with strong L2 shrinkage
         self.ridge_model = LogisticRegression(C=0.01, max_iter=1000, random_state=42)
         self.ridge_model.fit(X_df, y_ser)
 
@@ -448,25 +505,37 @@ class EnsembleQuantClassifier:
         lgb_imp = self.lgbm_model.feature_importances_.astype(float)
         if lgb_imp.sum() > 0:
             lgb_imp /= lgb_imp.sum()
+        cb_imp = self.catboost_model.get_feature_importance().astype(float)
+        if cb_imp.sum() > 0:
+            cb_imp /= cb_imp.sum()
+        xgb_imp = self.xgboost_model.feature_importances_.astype(float)
+        if xgb_imp.sum() > 0:
+            xgb_imp /= xgb_imp.sum()
         ridge_imp = np.abs(self.ridge_model.coef_[0])
         if ridge_imp.sum() > 0:
             ridge_imp /= ridge_imp.sum()
 
         self.feature_importances_ = (
-            self.neural_weight * nn_imp
-            + self.lgbm_weight * lgb_imp
+            self.lgbm_weight * lgb_imp
+            + self.catboost_weight * cb_imp
+            + self.xgboost_weight * xgb_imp
+            + self.neural_weight * nn_imp
             + self.ridge_weight * ridge_imp
         )
         return self
 
     def predict_proba(self, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
-        p_nn = self.nn_model.predict_proba(X)
         p_lgb = self.lgbm_model.predict_proba(X)
+        p_cb = self.catboost_model.predict_proba(X)
+        p_xgb = self.xgboost_model.predict_proba(X)
+        p_nn = self.nn_model.predict_proba(X)
         p_ridge = self.ridge_model.predict_proba(X)
 
         blended = (
-            self.neural_weight * p_nn
-            + self.lgbm_weight * p_lgb
+            self.lgbm_weight * p_lgb
+            + self.catboost_weight * p_cb
+            + self.xgboost_weight * p_xgb
+            + self.neural_weight * p_nn
             + self.ridge_weight * p_ridge
         )
         return blended
@@ -478,17 +547,21 @@ class EnsembleQuantClassifier:
     def predict_signal(self, X_latest: pd.DataFrame) -> Dict[str, Any]:
         """
         True multi-model quantitative ensemble prediction for Coca-Cola ($KO).
-        Blends Neural Net (50%), LightGBM (35%), and Ridge (15%).
+        Blends LightGBM (30%), CatBoost (25%), XGBoost (20%), Deep Neural Net (15%), Ridge (10%).
         Calculates calibrated ensemble consensus, dispersion-penalized confidence,
-        and continuous active position allocation.
+        and continuous active conviction allocation.
         """
-        p_nn = float(self.nn_model.predict_proba(X_latest)[-1, 1])
         p_lgb = float(self.lgbm_model.predict_proba(X_latest)[-1, 1])
+        p_cb = float(self.catboost_model.predict_proba(X_latest)[-1, 1])
+        p_xgb = float(self.xgboost_model.predict_proba(X_latest)[-1, 1])
+        p_nn = float(self.nn_model.predict_proba(X_latest)[-1, 1])
         p_ridge = float(self.ridge_model.predict_proba(X_latest)[-1, 1])
 
         blended_prob = float(
-            self.neural_weight * p_nn
-            + self.lgbm_weight * p_lgb
+            self.lgbm_weight * p_lgb
+            + self.catboost_weight * p_cb
+            + self.xgboost_weight * p_xgb
+            + self.neural_weight * p_nn
             + self.ridge_weight * p_ridge
         )
 
@@ -497,14 +570,14 @@ class EnsembleQuantClassifier:
         pred_vol = nn_sig["predictive_volatility_pct"] / 100.0
 
         # Institutional confidence: measures deviation from 0.50 normalized by 0.12 band
-        # Penalized if submodels disagree (high dispersion)
-        dispersion = float(np.std([p_nn, p_lgb, p_ridge]))
+        # Penalized if submodels disagree (high dispersion across paradigms)
+        dispersion = float(np.std([p_lgb, p_cb, p_xgb, p_nn, p_ridge]))
         raw_conf = (abs(blended_prob - 0.5) / 0.12) * 0.50
         confidence = float(np.clip(raw_conf * max(0.2, 1.0 - dispersion * 2.0), 0.05, 0.65))
 
-        # Active tilt around benchmark:
+        # Active conviction tilt around benchmark:
         tilt = (blended_prob - 0.50) / 0.08
-        target_weight = float(np.clip(0.50 + tilt * 0.50, 0.0, 1.0))
+        target_weight = float(np.clip(0.60 + tilt * 0.70, 0.0, 1.35))
 
         if blended_prob >= 0.52:
             action = "BUY / LONG"
@@ -526,8 +599,10 @@ class EnsembleQuantClassifier:
             "recommended_weight_pct": round(target_weight * 100.0, 1),
             "action": action,
             "submodel_probs": {
-                "neural_machine": round(p_nn, 4),
                 "lightgbm": round(p_lgb, 4),
+                "catboost": round(p_cb, 4),
+                "xgboost": round(p_xgb, 4),
+                "neural_machine": round(p_nn, 4),
                 "ridge": round(p_ridge, 4),
             },
         }

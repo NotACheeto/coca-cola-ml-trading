@@ -20,12 +20,18 @@ class BacktestEngine:
         position_sizing: str = "confidence_weighted",
         target_volatility: float = 0.12,
         allow_short: bool = False,
+        max_leverage: float = 1.35,
+        risk_free_rate: float = 0.045,
+        periods_per_year: int = 756,
     ):
         self.initial_capital = initial_capital
         self.cost_rate = transaction_cost_bps / 10000.0  # Convert bps to decimal
         self.position_sizing = position_sizing
         self.target_volatility = target_volatility
         self.allow_short = allow_short
+        self.max_leverage = max_leverage
+        self.risk_free_rate = risk_free_rate
+        self.periods_per_year = periods_per_year
 
     def run(
         self,
@@ -62,17 +68,17 @@ class BacktestEngine:
             raw_weights = pd.Series(np.where(probs >= 0.50, 1.0, -1.0 if self.allow_short else 0.0), index=common_idx)
         elif self.position_sizing == "confidence_weighted":
             if not self.allow_short:
-                # Active long-only allocation: 0.50 neutral baseline adjusted by alpha edge
-                # A +/- 0.08 probability shift scales active weight from 0% (cash hedge) to 100% (bullish)
+                # Institutional active conviction allocation:
+                # 0.60 neutral base scaled by alpha edge up to max_leverage (e.g. 1.35x), trimming to 0% (cash hedge)
                 tilt = (probs - 0.50) / 0.08
-                raw_weights = (0.50 + tilt * 0.50).clip(lower=0.0, upper=1.0)
+                raw_weights = (0.60 + tilt * 0.70).clip(lower=0.0, upper=self.max_leverage)
             else:
-                raw_weights = ((probs - 0.50) / 0.08).clip(lower=-1.0, upper=1.0)
+                raw_weights = ((probs - 0.50) / 0.08).clip(lower=-self.max_leverage, upper=self.max_leverage)
         elif self.position_sizing == "volatility_targeted":
             # Scale inversely by 20-day historical volatility
             roll_vol = daily_ret.rolling(20).std() * np.sqrt(252)
             roll_vol = roll_vol.replace(0, np.nan).bfill()
-            vol_scaler = (self.target_volatility / roll_vol).clip(lower=0.2, upper=1.5)
+            vol_scaler = (self.target_volatility / roll_vol).clip(lower=0.2, upper=self.max_leverage)
             direction = np.where(probs >= 0.50, 1.0, -1.0 if self.allow_short else 0.0)
             raw_weights = pd.Series(direction * vol_scaler, index=common_idx)
         else:
@@ -85,9 +91,12 @@ class BacktestEngine:
         weight_changes = positions.diff().abs().fillna(positions.abs().iloc[0])
         trade_costs = weight_changes * self.cost_rate
 
-        # 4. Strategy Returns
+        # 4. Strategy Returns with Realistic Unallocated Cash Yield
         gross_returns = positions * daily_ret
-        net_returns = gross_returns - trade_costs
+        # Unallocated cash earns short-term risk-free yield (e.g. 4.5% annual T-bill rate)
+        cash_frac = np.maximum(0.0, 1.0 - positions)
+        cash_yield = cash_frac * (self.risk_free_rate / float(self.periods_per_year))
+        net_returns = gross_returns - trade_costs + cash_yield
 
         # 5. Equity Curves
         strategy_equity = self.initial_capital * (1.0 + net_returns).cumprod()

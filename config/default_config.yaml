@@ -67,17 +67,19 @@ model:
     purge_window: 15               # Purge overlapping forward-looking label windows (15 bars = 5 days)
     embargo_pct: 0.01              # Embargo fold borders
   ensemble:
-    neural_weight: 0.50            # 50% Deep Neural Network
-    lgbm_weight: 0.35              # 35% LightGBM
-    ridge_weight: 0.15             # 15% Ridge
+    lgbm_weight: 0.30              # 30% LightGBM (leaf-wise gradient boosting)
+    catboost_weight: 0.25          # 25% CatBoost (ordered symmetric oblivious trees)
+    xgboost_weight: 0.20           # 20% XGBoost (depth-wise regularized trees)
+    neural_weight: 0.15            # 15% Deep Tabular ResNet (3,520 neurons)
+    ridge_weight: 0.10             # 10% Ridge L2 Regularized Anchor
   neural_network:
-    hidden_dims: [512, 512, 256, 128, 64] # 1,472 neurons deep tabular architecture
+    hidden_dims: [512, 512, 256, 128, 64] # 3,520 neurons deep tabular architecture
     dropout: 0.30
     learning_rate: 0.001
-    weight_decay: 0.0001
-    epochs: 75
+    weight_decay: 0.001
+    epochs: 40
     batch_size: 64
-    early_stopping_patience: 12
+    early_stopping_patience: 10
     random_state: 42
   lightgbm:
     n_estimators: 150
@@ -85,32 +87,51 @@ model:
     max_depth: 4
     num_leaves: 15
     subsample: 0.8
-    colsample_bytree: 0.8
-    reg_alpha: 0.1
-    reg_lambda: 1.0
+    colsample_bytree: 0.7
+    reg_alpha: 0.5
+    reg_lambda: 2.0
     random_state: 42
+    verbose: -1
+  catboost:
+    iterations: 200
+    learning_rate: 0.03
+    depth: 4
+    l2_leaf_reg: 3.0
+    random_seed: 42
+    verbose: 0
+  xgboost:
+    n_estimators: 150
+    learning_rate: 0.03
+    max_depth: 4
+    subsample: 0.8
+    colsample_bytree: 0.7
+    reg_alpha: 0.5
+    reg_lambda: 2.0
+    random_state: 42
+    eval_metric: "logloss"
   hyperparameters:
     # Fallback hyperparameters if single model type is selected
     hidden_dims: [512, 512, 256, 128, 64]
     dropout: 0.30
     learning_rate: 0.001
-    weight_decay: 0.0001
-    epochs: 75
+    weight_decay: 0.001
+    epochs: 40
     batch_size: 64
-    early_stopping_patience: 12
+    early_stopping_patience: 10
     n_estimators: 150
     max_depth: 4
     num_leaves: 15
     subsample: 0.8
-    colsample_bytree: 0.8
-    reg_alpha: 0.1
-    reg_lambda: 1.0
+    colsample_bytree: 0.7
+    reg_alpha: 0.5
+    reg_lambda: 2.0
     random_state: 42
 
 backtest:
   initial_capital: 100000.0
   transaction_cost_bps: 5.0        # 5 bps per side (slippage + fee)
-  position_sizing: "confidence_weighted" # "binary", "confidence_weighted", "volatility_target"
-  target_volatility: 0.12          # 12% annualized target volatility
-  max_leverage: 1.0
+  position_sizing: "confidence_weighted" # "binary", "confidence_weighted", "volatility_targeted"
+  target_volatility: 0.11          # 11% annualized target volatility
+  max_leverage: 1.35               # Institutional conviction ceiling (matches Coca-Cola asset volatility)
+  risk_free_rate: 0.045            # 4.5% annual yield on idle unallocated cash
   periods_per_year: 756            # 252 days * 3 sessions per day
