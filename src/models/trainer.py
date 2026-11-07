@@ -168,10 +168,20 @@ class ModelTrainer:
         X_sub = X_latest[self.feature_names]
         X_scaled = pd.DataFrame(self.scaler.transform(X_sub), columns=self.feature_names, index=X_sub.index)
 
+        # Format timestamp and session
+        ts = X_latest.index[-1]
+        session_name = {
+            11: "Morning Session (11:30 ET)",
+            13: "Midday Session (13:30 ET)",
+            16: "Afternoon / Close Session (16:00 ET)",
+        }.get(ts.hour, "Daily Close" if ts.hour == 0 else f"Session ({ts.strftime('%H:%M')} ET)")
+        date_str = str(ts.date()) if ts.hour == 0 else str(ts)
+
         # If model has dedicated quant multi-task decision engine, use it
         if hasattr(self.fitted_model, "predict_signal"):
             res = self.fitted_model.predict_signal(X_scaled)
-            res["date"] = str(X_latest.index[-1].date())
+            res["date"] = date_str
+            res["session"] = session_name
             return res
 
         # Predict probability of class 1 (Outperform)

@@ -30,12 +30,13 @@ class TradingPipeline:
             cache_dir=self.config.get("data", {}).get("cache_dir", "data/cache"),
             start_date=self.config.get("data", {}).get("start_date", "2019-01-01"),
             end_date=self.config.get("data", {}).get("end_date", None),
+            bars_per_day=self.config.get("data", {}).get("bars_per_day", 3),
         )
 
         feat_cfg = self.config.get("features", {})
         self.feature_engineer = FeatureEngineer(
             universe=self.universe,
-            rolling_windows=feat_cfg.get("rolling_windows", [5, 10, 21, 63]),
+            rolling_windows=feat_cfg.get("rolling_windows", [15, 30, 63, 189]),
             lead_lag_lags=feat_cfg.get("lead_lag_lags", [1, 2, 3]),
             cointegration_pairs=feat_cfg.get("cointegration_pairs", [["KO", "PEP"], ["KO", "XLP"], ["KO", "COKE"], ["KO", "TLT"]]),
             pca_components=feat_cfg.get("pca", {}).get("n_components", 3),
@@ -43,7 +44,7 @@ class TradingPipeline:
 
         label_cfg = self.config.get("labeling", {})
         self.labeler = TargetLabeler(
-            forward_horizon=label_cfg.get("forward_horizon", 5),
+            forward_horizon=label_cfg.get("forward_horizon", 15),
             neutral_threshold=label_cfg.get("neutral_threshold", 0.0015),
             target_type=label_cfg.get("target_type", "relative_alpha"),
         )

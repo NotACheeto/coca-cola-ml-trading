@@ -64,3 +64,44 @@ def test_target_labeling(sample_price_data):
     assert len(y) == len(sample_price_data)
     assert set(y.dropna().unique()).issubset({0, 1})
     assert len(fwd_ret.dropna()) == len(sample_price_data) - 5
+
+
+def test_intraday_3sessions_features(sample_price_data, sample_ohlcv_data):
+    """Verifies that 3-session intraday index correctly generates session regime indicators."""
+    universe = AssetUniverse()
+    fe = FeatureEngineer(universe=universe, rolling_windows=[5, 10, 21], lead_lag_lags=[1, 2])
+
+    # Convert sample dates to 3 intraday session timestamps
+    session_ts = []
+    for d in sample_price_data.index:
+        d_str = d.strftime("%Y-%m-%d")
+        session_ts.extend([
+            pd.Timestamp(f"{d_str} 11:30:00"),
+            pd.Timestamp(f"{d_str} 13:30:00"),
+            pd.Timestamp(f"{d_str} 16:00:00"),
+        ])
+    
+    tiled_prices = pd.DataFrame(
+        np.repeat(sample_price_data.values, 3, axis=0),
+        index=pd.DatetimeIndex(session_ts),
+        columns=sample_price_data.columns,
+    )
+    tiled_ohlcv = pd.DataFrame(
+        np.repeat(sample_ohlcv_data.values, 3, axis=0),
+        index=pd.DatetimeIndex(session_ts),
+        columns=sample_ohlcv_data.columns,
+    )
+
+    features = fe.compute_features(tiled_prices, ohlcv=tiled_ohlcv)
+
+    assert not features.empty
+    assert "session_id" in features.columns
+    assert "session_sin" in features.columns
+    assert "session_cos" in features.columns
+    assert "is_morning_session" in features.columns
+    assert "is_midday_session" in features.columns
+    assert "is_close_session" in features.columns
+    assert "session_return" in features.columns
+    assert "session_volume_ratio" in features.columns
+    assert set(features["session_id"].unique()).issubset({0, 1, 2})
+

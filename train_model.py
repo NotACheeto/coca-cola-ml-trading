@@ -38,6 +38,7 @@ def train(
         cache_dir=config.get("data", {}).get("cache_dir", "data/cache"),
         start_date=config.get("data", {}).get("start_date", "2019-01-01"),
         end_date=cutoff_date,
+        bars_per_day=config.get("data", {}).get("bars_per_day", 3),
     )
 
     # Fetch training slice
@@ -47,8 +48,8 @@ def train(
     prices = prices[prices.index <= pd.to_datetime(cutoff_date)]
     target_ohlcv = target_ohlcv[target_ohlcv.index <= pd.to_datetime(cutoff_date)]
 
-    print(f"    Training dataset span: {prices.index[0].date()} to {prices.index[-1].date()}")
-    print(f"    Total trading days in training set: {len(prices)} bars")
+    print(f"    Training dataset span: {prices.index[0]} to {prices.index[-1]}")
+    print(f"    Total session observations in training set: {len(prices)} bars (3 sessions per day)")
     assert prices.index.max() <= pd.to_datetime(cutoff_date), f"Data leak! Found date {prices.index.max()} > {cutoff_date}"
     assert target_ohlcv.index.max() <= pd.to_datetime(cutoff_date), f"Data leak in OHLCV! Found date {target_ohlcv.index.max()} > {cutoff_date}"
 
@@ -56,7 +57,7 @@ def train(
     feat_cfg = config.get("features", {})
     engineer = FeatureEngineer(
         universe=universe,
-        rolling_windows=feat_cfg.get("rolling_windows", [5, 10, 21, 63]),
+        rolling_windows=feat_cfg.get("rolling_windows", [15, 30, 63, 189]),
         lead_lag_lags=feat_cfg.get("lead_lag_lags", [1, 2, 3]),
         cointegration_pairs=feat_cfg.get("cointegration_pairs", [["KO", "PEP"], ["KO", "XLP"], ["KO", "COKE"], ["KO", "TLT"]]),
         pca_components=feat_cfg.get("pca", {}).get("n_components", 3),
@@ -66,7 +67,7 @@ def train(
     print("[*] Step 3: Computing supervisory relative alpha labels (KO vs XLP)...")
     label_cfg = config.get("labeling", {})
     labeler = TargetLabeler(
-        forward_horizon=label_cfg.get("forward_horizon", 5),
+        forward_horizon=label_cfg.get("forward_horizon", 15),
         neutral_threshold=label_cfg.get("neutral_threshold", 0.0015),
         target_type=label_cfg.get("target_type", "relative_alpha"),
     )

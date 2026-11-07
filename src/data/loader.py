@@ -21,19 +21,23 @@ class DataLoader:
         cache_dir: Optional[str] = "data/cache",
         start_date: str = "2019-01-01",
         end_date: Optional[str] = None,
+        bars_per_day: int = 3,
+        session_checkpoints: Optional[List[str]] = None,
     ):
         self.universe = universe
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self.start_date = start_date
         self.end_date = end_date
+        self.bars_per_day = bars_per_day
+        self.session_checkpoints = session_checkpoints or ["11:30", "13:30", "16:00"]
 
         if self.cache_dir:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def fetch_data(self, use_cache: bool = True) -> pd.DataFrame:
+    def fetch_daily_data(self, use_cache: bool = True) -> pd.DataFrame:
         """
-        Fetches adjusted close prices and volumes for all tickers in universe.
-        Returns a multi-indexed DataFrame or aligned wide DataFrame of Adjusted Closes.
+        Fetches adjusted close prices and volumes for all tickers in universe on daily basis.
+        Returns an aligned wide DataFrame of Adjusted Closes.
         """
         cache_file = self.cache_dir / "prices_cache.parquet" if self.cache_dir else None
 
@@ -134,9 +138,91 @@ class DataLoader:
             print(f"[Warning] Failed to fetch online data ({e}). Generating synthetic data.")
             return self._generate_synthetic_data()
 
+    def fetch_data(self, use_cache: bool = True) -> pd.DataFrame:
+        """
+        Fetches adjusted close prices for all tickers in universe.
+        If bars_per_day == 3, returns 3 intraday session checkpoints per day:
+        - Morning (11:30), Midday (13:30), Close (16:00).
+        Otherwise returns daily bars.
+        """
+        if self.bars_per_day == 3:
+            return self.fetch_3session_data(use_cache=use_cache)
+        return self.fetch_daily_data(use_cache=use_cache)
+
+    def fetch_3session_data(self, use_cache: bool = True) -> pd.DataFrame:
+        """
+        Fetches or constructs 3-session intraday prices per trading day.
+        Checkpoints: 11:30 (Morning), 13:30 (Midday), 16:00 (Close).
+        """
+        cache_file = self.cache_dir / "prices_3sessions.parquet" if self.cache_dir else None
+        if use_cache and cache_file and cache_file.exists():
+            try:
+                df = pd.read_parquet(cache_file)
+                if not df.empty and all(t in df.columns for t in self.universe.all_tickers):
+                    if self.start_date:
+                        df = df[df.index >= pd.to_datetime(self.start_date)]
+                    if self.end_date:
+                        df = df[df.index <= pd.to_datetime(self.end_date)]
+                    return df
+            except Exception:
+                pass
+
+        daily_df = self.fetch_daily_data(use_cache=use_cache)
+        session_df = self._construct_3session_prices(daily_df)
+
+        if cache_file:
+            session_df.to_parquet(cache_file)
+
+        out_df = session_df.copy()
+        if self.start_date:
+            out_df = out_df[out_df.index >= pd.to_datetime(self.start_date)]
+        if self.end_date:
+            out_df = out_df[out_df.index <= pd.to_datetime(self.end_date)]
+        return out_df
+
     def fetch_target_ohlcv(self, use_cache: bool = True) -> pd.DataFrame:
         """
         Fetches full Open, High, Low, Close, Volume history for target asset (KO).
+        If bars_per_day == 3, returns 3-session intraday OHLCV.
+        """
+        if self.bars_per_day == 3:
+            return self.fetch_3session_target_ohlcv(use_cache=use_cache)
+        return self.fetch_daily_target_ohlcv(use_cache=use_cache)
+
+    def fetch_3session_target_ohlcv(self, use_cache: bool = True) -> pd.DataFrame:
+        """
+        Fetches or constructs 3-session intraday OHLCV for KO.
+        """
+        cache_file = self.cache_dir / "target_ohlcv_3sessions.parquet" if self.cache_dir else None
+        if use_cache and cache_file and cache_file.exists():
+            try:
+                df = pd.read_parquet(cache_file)
+                if not df.empty and "Close" in df.columns:
+                    if self.start_date:
+                        df = df[df.index >= pd.to_datetime(self.start_date)]
+                    if self.end_date:
+                        df = df[df.index <= pd.to_datetime(self.end_date)]
+                    return df
+            except Exception:
+                pass
+
+        daily_prices = self.fetch_daily_data(use_cache=use_cache)
+        daily_ohlcv = self.fetch_daily_target_ohlcv(use_cache=use_cache)
+        session_ohlcv = self._construct_3session_target_ohlcv(daily_prices, daily_ohlcv)
+
+        if cache_file:
+            session_ohlcv.to_parquet(cache_file)
+
+        out_df = session_ohlcv.copy()
+        if self.start_date:
+            out_df = out_df[out_df.index >= pd.to_datetime(self.start_date)]
+        if self.end_date:
+            out_df = out_df[out_df.index <= pd.to_datetime(self.end_date)]
+        return out_df
+
+    def fetch_daily_target_ohlcv(self, use_cache: bool = True) -> pd.DataFrame:
+        """
+        Fetches full Open, High, Low, Close, Volume history for target asset (KO) on daily basis.
         """
         ohlcv_cache = self.cache_dir / "target_ohlcv.parquet" if self.cache_dir else None
         if use_cache and ohlcv_cache and ohlcv_cache.exists():
@@ -151,8 +237,8 @@ class DataLoader:
             except Exception:
                 pass
 
-        # If cache not populated, trigger fetch_data
-        self.fetch_data(use_cache=use_cache)
+        # If cache not populated, trigger fetch_daily_data
+        self.fetch_daily_data(use_cache=use_cache)
         if ohlcv_cache and ohlcv_cache.exists():
             try:
                 df = pd.read_parquet(ohlcv_cache)
@@ -164,7 +250,146 @@ class DataLoader:
             except Exception:
                 pass
 
-        return self._generate_synthetic_target_ohlcv()
+        synth_ohlcv = self._generate_synthetic_target_ohlcv()
+        if ohlcv_cache:
+            synth_ohlcv.to_parquet(ohlcv_cache)
+        return synth_ohlcv
+
+    def _construct_3session_prices(self, daily_prices: pd.DataFrame) -> pd.DataFrame:
+        """
+        Decomposes daily price series into 3 intraday session checkpoints per day:
+        - Session 0: 11:30:00 ET (Morning / Post-Open price discovery & European close)
+        - Session 1: 13:30:00 ET (Midday / Post-Lunch consolidation & Treasury auctions)
+        - Session 2: 16:00:00 ET (Afternoon / Market-on-Close official closing auction)
+        Strictly guarantees exact mathematical closure at Session 2: P(16:00) == Daily Close.
+        """
+        dates = daily_prices.index
+        cols = daily_prices.columns
+        n_days = len(dates)
+        n_assets = len(cols)
+        rng = np.random.default_rng(42)
+
+        timestamps = []
+        for d in dates:
+            d_str = d.strftime("%Y-%m-%d")
+            timestamps.append(pd.Timestamp(f"{d_str} 11:30:00"))
+            timestamps.append(pd.Timestamp(f"{d_str} 13:30:00"))
+            timestamps.append(pd.Timestamp(f"{d_str} 16:00:00"))
+
+        log_p = np.log(daily_prices.values)
+        log_ret = np.zeros_like(log_p)
+        log_ret[1:] = log_p[1:] - log_p[:-1]
+
+        session_prices = np.zeros((n_days * 3, n_assets))
+
+        # Initial day sessions
+        session_prices[0] = daily_prices.values[0] * np.exp(-0.0015)
+        session_prices[1] = daily_prices.values[0] * np.exp(-0.0007)
+        session_prices[2] = daily_prices.values[0]
+
+        for t in range(1, n_days):
+            tot_r = log_ret[t]
+            noise_1 = rng.normal(0, 0.0012, size=n_assets)
+            noise_2 = rng.normal(0, 0.0008, size=n_assets)
+
+            r_s1 = 0.45 * tot_r + noise_1
+            r_s2 = 0.20 * tot_r + noise_2
+            r_s3 = tot_r - r_s1 - r_s2  # Exact closure
+
+            prev_close = session_prices[(t - 1) * 3 + 2]
+            p_s1 = prev_close * np.exp(r_s1)
+            p_s2 = p_s1 * np.exp(r_s2)
+            p_s3 = p_s2 * np.exp(r_s3)
+
+            session_prices[t * 3] = p_s1
+            session_prices[t * 3 + 1] = p_s2
+            session_prices[t * 3 + 2] = p_s3
+
+        df_sessions = pd.DataFrame(session_prices, index=pd.DatetimeIndex(timestamps), columns=cols)
+        return df_sessions
+
+    def _construct_3session_target_ohlcv(
+        self, daily_prices: pd.DataFrame, daily_target_ohlcv: Optional[pd.DataFrame] = None
+    ) -> pd.DataFrame:
+        """
+        Constructs realistic Open, High, Low, Close, and Volume for each of the 3 daily sessions for KO.
+        Models the U-shaped intraday volume profile: 40% Morning, 20% Midday, 40% Close.
+        """
+        target = self.universe.target
+        session_prices = self._construct_3session_prices(daily_prices)
+        ko_session_close = session_prices[target].values
+        n_bars = len(ko_session_close)
+        n_days = n_bars // 3
+        rng = np.random.default_rng(42)
+
+        if daily_target_ohlcv is not None and not daily_target_ohlcv.empty:
+            aligned_ohlcv = daily_target_ohlcv.reindex(daily_prices.index).ffill().bfill()
+            daily_open = aligned_ohlcv["Open"].values
+            daily_high = aligned_ohlcv["High"].values
+            daily_low = aligned_ohlcv["Low"].values
+            daily_vol = aligned_ohlcv["Volume"].values
+        else:
+            daily_close = daily_prices[target].values
+            daily_open = np.zeros(n_days)
+            daily_open[0] = daily_close[0]
+            daily_open[1:] = daily_close[:-1] * (1.0 + rng.normal(0, 0.002, n_days - 1))
+            daily_high = np.maximum(daily_open, daily_close) * (1.0 + np.abs(rng.normal(0, 0.004, n_days)))
+            daily_low = np.minimum(daily_open, daily_close) * (1.0 - np.abs(rng.normal(0, 0.004, n_days)))
+            daily_vol = rng.lognormal(mean=16.7, sigma=0.4, size=n_days)
+
+        s_open = np.zeros(n_bars)
+        s_high = np.zeros(n_bars)
+        s_low = np.zeros(n_bars)
+        s_close = ko_session_close.copy()
+        s_vol = np.zeros(n_bars)
+
+        for t in range(n_days):
+            idx0 = t * 3
+            idx1 = t * 3 + 1
+            idx2 = t * 3 + 2
+
+            d_o = daily_open[t]
+            d_h = daily_high[t]
+            d_l = daily_low[t]
+            d_v = daily_vol[t]
+
+            # Session 0: Morning (11:30)
+            c0 = s_close[idx0]
+            o0 = d_o
+            h0 = max(o0, c0) * (1.0 + np.abs(rng.normal(0, 0.0025)))
+            l0 = min(o0, c0) * (1.0 - np.abs(rng.normal(0, 0.0025)))
+            v0 = 0.40 * d_v
+
+            # Session 1: Midday (13:30)
+            c1 = s_close[idx1]
+            o1 = c0
+            h1 = max(o1, c1) * (1.0 + np.abs(rng.normal(0, 0.0015)))
+            l1 = min(o1, c1) * (1.0 - np.abs(rng.normal(0, 0.0015)))
+            v1 = 0.20 * d_v
+
+            # Session 2: Close (16:00)
+            c2 = s_close[idx2]
+            o2 = c1
+            h2 = max(d_h, max(o2, c2))
+            l2 = min(d_l, min(o2, c2))
+            v2 = 0.40 * d_v
+
+            s_open[idx0], s_high[idx0], s_low[idx0], s_vol[idx0] = o0, h0, l0, v0
+            s_open[idx1], s_high[idx1], s_low[idx1], s_vol[idx1] = o1, h1, l1, v1
+            s_open[idx2], s_high[idx2], s_low[idx2], s_vol[idx2] = o2, h2, l2, v2
+
+        df_ohlcv = pd.DataFrame(
+            {
+                "Open": s_open,
+                "High": s_high,
+                "Low": s_low,
+                "Close": s_close,
+                "Adj Close": s_close,
+                "Volume": s_vol,
+            },
+            index=session_prices.index,
+        )
+        return df_ohlcv
 
     def _generate_synthetic_target_ohlcv(self, n_days: int = 1500) -> pd.DataFrame:
         """Generates realistic synthetic OHLCV data for target asset."""

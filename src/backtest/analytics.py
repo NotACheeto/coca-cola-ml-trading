@@ -13,30 +13,39 @@ class PerformanceAnalytics:
     """Computes comprehensive quantitative performance and risk metrics."""
 
     @staticmethod
-    def calculate_metrics(returns: pd.Series, risk_free_rate: float = 0.03) -> Dict[str, float]:
+    def calculate_metrics(
+        returns: pd.Series,
+        risk_free_rate: float = 0.03,
+        periods_per_year: Optional[int] = None,
+    ) -> Dict[str, float]:
         """
-        Computes standard portfolio analytics on daily net returns.
+        Computes standard portfolio analytics on net returns.
+        Auto-detects periods_per_year (756 for 3-session intraday, 252 for daily) if not provided.
         """
         clean_ret = returns.dropna()
-        n_days = len(clean_ret)
-        if n_days < 2:
+        n_bars = len(clean_ret)
+        if n_bars < 2:
             return {}
 
-        years = n_days / 252.0
+        if periods_per_year is None:
+            is_intraday = isinstance(clean_ret.index, pd.DatetimeIndex) and any(clean_ret.index.hour != 0)
+            periods_per_year = 756 if is_intraday else 252
+
+        years = n_bars / float(periods_per_year)
         cum_ret = (1.0 + clean_ret).prod() - 1.0
         cagr = (1.0 + cum_ret) ** (1.0 / max(years, 0.01)) - 1.0
 
-        ann_vol = clean_ret.std() * np.sqrt(252)
+        ann_vol = clean_ret.std() * np.sqrt(periods_per_year)
 
         # Excess return for Sharpe
-        rf_daily = (1.0 + risk_free_rate) ** (1.0 / 252.0) - 1.0
-        excess_ret = clean_ret - rf_daily
-        sharpe = (excess_ret.mean() * np.sqrt(252)) / (clean_ret.std() + 1e-8)
+        rf_period = (1.0 + risk_free_rate) ** (1.0 / float(periods_per_year)) - 1.0
+        excess_ret = clean_ret - rf_period
+        sharpe = (excess_ret.mean() * np.sqrt(periods_per_year)) / (clean_ret.std() + 1e-8)
 
         # Sortino (downside deviation below 0)
         downside = clean_ret[clean_ret < 0]
-        downside_vol = downside.std() * np.sqrt(252) if len(downside) > 0 else 1e-8
-        sortino = (excess_ret.mean() * np.sqrt(252)) / (downside_vol + 1e-8)
+        downside_vol = downside.std() * np.sqrt(periods_per_year) if len(downside) > 0 else 1e-8
+        sortino = (excess_ret.mean() * np.sqrt(periods_per_year)) / (downside_vol + 1e-8)
 
         # Drawdowns
         equity = (1.0 + clean_ret).cumprod()

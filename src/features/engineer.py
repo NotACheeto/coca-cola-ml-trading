@@ -53,6 +53,21 @@ class FeatureEngineer:
         daily_log_returns = log_prices.diff()
         target_series = prices[target]
 
+        is_intraday = isinstance(prices.index, pd.DatetimeIndex) and any(prices.index.hour != 0)
+        ann_factor = 756.0 if is_intraday else 252.0
+
+        # Intraday 3-Session Checkpoints & Microstructure Regime
+        if is_intraday:
+            session_map = {11: 0, 13: 1, 16: 2}
+            session_ids = prices.index.hour.map(lambda h: session_map.get(h, 0)).astype(int)
+            f_dict["session_id"] = session_ids
+            f_dict["session_sin"] = np.sin(2.0 * np.pi * session_ids / 3.0)
+            f_dict["session_cos"] = np.cos(2.0 * np.pi * session_ids / 3.0)
+            f_dict["is_morning_session"] = (session_ids == 0).astype(float)
+            f_dict["is_midday_session"] = (session_ids == 1).astype(float)
+            f_dict["is_close_session"] = (session_ids == 2).astype(float)
+            f_dict["session_return"] = daily_returns[target].fillna(0.0)
+
         # 2. Target Microstructure, Range, & Advanced Volatility Estimators (if OHLCV provided)
         if ohlcv is not None and not ohlcv.empty and all(c in ohlcv.columns for c in ["Open", "High", "Low", "Close"]):
             o = ohlcv["Open"]
@@ -70,28 +85,33 @@ class FeatureEngineer:
             # Parkinson Volatility: sqrt(1/(4*ln2) * ln(H/L)^2)
             log_hl = np.log(h / (l + 1e-8))
             park_var_daily = (log_hl ** 2) / (4.0 * np.log(2.0))
-            for w in [5, 10, 21, 63]:
-                f_dict[f"vol_parkinson_w{w}"] = np.sqrt(park_var_daily.rolling(w).mean() * 252.0)
+            for w in self.rolling_windows:
+                f_dict[f"vol_parkinson_w{w}"] = np.sqrt(park_var_daily.rolling(w, min_periods=min(w, 5)).mean() * ann_factor)
 
             # Garman-Klass Volatility: 0.5 * ln(H/L)^2 - (2*ln2 - 1) * ln(C/O)^2
             log_co = np.log(c / (o + 1e-8))
             gk_var_daily = np.maximum(0.0, 0.5 * (log_hl ** 2) - (2.0 * np.log(2.0) - 1.0) * (log_co ** 2))
-            for w in [5, 10, 21, 63]:
-                f_dict[f"vol_garman_klass_w{w}"] = np.sqrt(gk_var_daily.rolling(w).mean() * 252.0)
+            for w in self.rolling_windows:
+                f_dict[f"vol_garman_klass_w{w}"] = np.sqrt(gk_var_daily.rolling(w, min_periods=min(w, 5)).mean() * ann_factor)
 
             # Average True Range (ATR)
             tr = pd.concat([h - l, (h - c.shift(1)).abs(), (l - c.shift(1)).abs()], axis=1).max(axis=1)
-            for w in [7, 14, 21, 63]:
-                atr = tr.rolling(w).mean()
+            for w in self.rolling_windows:
+                atr = tr.rolling(w, min_periods=min(w, 5)).mean()
                 f_dict[f"atr_norm_w{w}"] = atr / (c + 1e-8)
 
             # Volume & Flow Dynamics
             if "Volume" in ohlcv.columns:
-                for w in [10, 20, 63]:
-                    v_mean = v.rolling(w).mean()
-                    v_std = v.rolling(w).std() + 1e-8
+                for w in self.rolling_windows:
+                    v_mean = v.rolling(w, min_periods=min(w, 5)).mean()
+                    v_std = v.rolling(w, min_periods=min(w, 5)).std() + 1e-8
                     f_dict[f"volume_zscore_w{w}"] = (v - v_mean) / v_std
-                    f_dict[f"volume_ratio_median_w{w}"] = v / (v.rolling(w).median() + 1e-8)
+                    f_dict[f"volume_ratio_median_w{w}"] = v / (v.rolling(w, min_periods=min(w, 5)).median() + 1e-8)
+
+                if is_intraday:
+                    # Session-specific volume ratio (normalizes U-shaped volume curve)
+                    sess_mean_v = v.groupby(session_ids).transform(lambda s: s.rolling(20, min_periods=5).mean().shift(1))
+                    f_dict["session_volume_ratio"] = (v / (sess_mean_v + 1e-8)).fillna(1.0).clip(0.1, 10.0)
 
                 # On-Balance Volume (OBV)
                 obv_dir = np.sign(c.diff().fillna(0.0))
@@ -275,14 +295,17 @@ class FeatureEngineer:
         features = pd.DataFrame(f_dict, index=prices.index)
 
         # 10. Unsupervised Latent Factors via Rolling PCA on Competitor Returns
+        pca_window = 189 if is_intraday else 63
+        pca_window = min(len(daily_returns) // 3, pca_window)
+        pca_window = max(20, pca_window)
         peer_cols = [c for c in self.universe.direct_competitors if c in daily_returns.columns]
         if len(peer_cols) >= 3 and self.pca_components > 0:
-            features = self._add_rolling_pca_factors(features, daily_returns[peer_cols], prefix="peer_pca", window=63)
+            features = self._add_rolling_pca_factors(features, daily_returns[peer_cols], prefix="peer_pca", window=pca_window)
 
         # Macro/Commodity PCA
         macro_cols = [c for c in ["TLT", "IEF", "HYG", "UUP", "CANE", "USO", "DBB", "XLP"] if c in daily_returns.columns]
         if len(macro_cols) >= 3 and self.pca_components > 0:
-            features = self._add_rolling_pca_factors(features, daily_returns[macro_cols], prefix="macro_pca", window=63)
+            features = self._add_rolling_pca_factors(features, daily_returns[macro_cols], prefix="macro_pca", window=pca_window)
 
         # Drop warm-up NaN rows caused by rolling windows
         features = features.dropna()

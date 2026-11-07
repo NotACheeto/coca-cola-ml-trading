@@ -44,20 +44,21 @@ def test_out_of_sample(
     loader = DataLoader(
         universe=universe,
         cache_dir=config.get("data", {}).get("cache_dir", "data/cache"),
-        start_date="2023-01-01",  # Warm-up period for 63-day rolling indicators
+        start_date="2023-01-01",  # Warm-up period for rolling indicators
         end_date=None,             # Fetch up to current date
+        bars_per_day=config.get("data", {}).get("bars_per_day", 3),
     )
     prices = loader.fetch_data(use_cache=True)
     target_ohlcv = loader.fetch_target_ohlcv(use_cache=True)
 
-    print(f"    Total data available: {prices.index[0].date()} to {prices.index[-1].date()} ({len(prices)} bars)")
+    print(f"    Total data available: {prices.index[0]} to {prices.index[-1]} ({len(prices)} bars)")
 
     # 3. Engineer features
     print("[*] Step 3: Generating 200+ features on unseen data...")
     feat_cfg = config.get("features", {})
     engineer = FeatureEngineer(
         universe=universe,
-        rolling_windows=feat_cfg.get("rolling_windows", [5, 10, 21, 63]),
+        rolling_windows=feat_cfg.get("rolling_windows", [15, 30, 63, 189]),
         lead_lag_lags=feat_cfg.get("lead_lag_lags", [1, 2, 3]),
         cointegration_pairs=feat_cfg.get("cointegration_pairs", [["KO", "PEP"], ["KO", "XLP"], ["KO", "COKE"], ["KO", "TLT"]]),
         pca_components=feat_cfg.get("pca", {}).get("n_components", 3),
@@ -68,8 +69,8 @@ def test_out_of_sample(
     test_mask = X.index >= pd.to_datetime(test_start_date)
     X_test = X[test_mask]
 
-    print(f"    Out-of-sample evaluation dataset: {X_test.index[0].date()} to {X_test.index[-1].date()}")
-    print(f"    Test sample count: {len(X_test)} trading days")
+    print(f"    Out-of-sample evaluation dataset: {X_test.index[0]} to {X_test.index[-1]}")
+    print(f"    Test sample count: {len(X_test)} session observations (3 checkpoints/day)")
 
     # 4. Generate Predictions using the model trained <= 2023
     print("[*] Step 4: Generating out-of-sample predictions and trade signals...")

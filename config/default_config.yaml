@@ -36,14 +36,16 @@ universe:
     - "VIXY"  # ProShares VIX Short-Term Futures (market risk / flight to safety)
 
 data:
+  bars_per_day: 3                  # 3 intraday checkpoints per day: Morning (11:30), Midday (13:30), Close (16:00)
+  session_checkpoints: ["11:30", "13:30", "16:00"]
   start_date: "2019-01-01"
   end_date: "2023-12-31"  # Cutoff at 2023-12-31 to reserve 2024+ strictly for out-of-sample testing
   test_start_date: "2024-01-01"
   cache_dir: "data/cache"
 
 features:
-  rolling_windows: [5, 10, 21, 63] # 1w, 2w, 1m, 1q
-  lead_lag_lags: [1, 2, 3]         # Prior days competitor & macro return leads
+  rolling_windows: [15, 30, 63, 189] # Scaled for 3 bars/day (5d, 10d, 21d, 63d equivalents)
+  lead_lag_lags: [1, 2, 3]         # Prior session competitor & macro return leads
   cointegration_pairs:
     - ["KO", "PEP"]
     - ["KO", "XLP"]
@@ -54,7 +56,7 @@ features:
     n_components: 3
 
 labeling:
-  forward_horizon: 5               # 5 trading days forward
+  forward_horizon: 15              # 15 session bars = 5 trading days forward
   target_type: "relative_alpha"    # Forward KO return minus Forward XLP return
   neutral_threshold: 0.0015        # +/- 15 bps buffer to filter noise
 
@@ -62,7 +64,7 @@ model:
   type: "ensemble"                 # "ensemble", "neural_network", "lightgbm", or "ridge"
   cv:
     n_splits: 5
-    purge_window: 5                # Purge overlapping forward-looking label windows
+    purge_window: 15               # Purge overlapping forward-looking label windows (15 bars = 5 days)
     embargo_pct: 0.01              # Embargo fold borders
   ensemble:
     neural_weight: 0.50            # 50% Deep Neural Network
@@ -111,3 +113,4 @@ backtest:
   position_sizing: "confidence_weighted" # "binary", "confidence_weighted", "volatility_target"
   target_volatility: 0.12          # 12% annualized target volatility
   max_leverage: 1.0
+  periods_per_year: 756            # 252 days * 3 sessions per day

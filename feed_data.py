@@ -38,21 +38,22 @@ def feed_and_update(
         cache_dir=config.get("data", {}).get("cache_dir", "data/cache"),
         start_date=config.get("data", {}).get("start_date", "2019-01-01"),
         end_date=None,
+        bars_per_day=config.get("data", {}).get("bars_per_day", 3),
     )
 
     # 1. Ingest Data (either from CSV, live delta update, or cache)
     if csv_file:
         print(f"[*] Feeding custom data from CSV file: {csv_file}")
         prices = loader.load_from_csv(csv_file)
-        print(f"    Loaded custom data up to {prices.index[-1].date()} ({len(prices)} total bars)")
+        print(f"    Loaded custom data up to {prices.index[-1]} ({len(prices)} total bars)")
     elif live_update:
         print("[*] Fetching live market updates from online sources...")
         prices, new_bars = loader.update_latest()
-        print(f"    Ingested {new_bars} new daily market bars. Latest date: {prices.index[-1].date()}")
+        print(f"    Ingested {new_bars} new daily market bars. Latest date: {prices.index[-1]}")
     else:
         print("[*] Loading existing market data from cache...")
         prices = loader.fetch_data(use_cache=True)
-        print(f"    Current dataset date span: {prices.index[0].date()} to {prices.index[-1].date()}")
+        print(f"    Current dataset date span: {prices.index[0]} to {prices.index[-1]} ({len(prices)} bars)")
 
     target_ohlcv = loader.fetch_target_ohlcv(use_cache=True)
 
@@ -61,7 +62,7 @@ def feed_and_update(
     feat_cfg = config.get("features", {})
     engineer = FeatureEngineer(
         universe=universe,
-        rolling_windows=feat_cfg.get("rolling_windows", [5, 10, 21, 63]),
+        rolling_windows=feat_cfg.get("rolling_windows", [15, 30, 63, 189]),
         lead_lag_lags=feat_cfg.get("lead_lag_lags", [1, 2, 3]),
         cointegration_pairs=feat_cfg.get("cointegration_pairs", [["KO", "PEP"], ["KO", "XLP"], ["KO", "COKE"], ["KO", "TLT"]]),
         pca_components=feat_cfg.get("pca", {}).get("n_components", 3),
@@ -71,7 +72,7 @@ def feed_and_update(
     # 3. Compute Supervisory Target Labels
     print("[*] Step 3: Computing supervisory relative alpha targets...")
     labeler = TargetLabeler(
-        forward_horizon=config.get("labeling", {}).get("forward_horizon", 5),
+        forward_horizon=config.get("labeling", {}).get("forward_horizon", 15),
         neutral_threshold=config.get("labeling", {}).get("neutral_threshold", 0.0015),
     )
     y, _ = labeler.create_labels(prices, target_ticker="KO", benchmark_ticker="XLP")
@@ -130,6 +131,8 @@ def feed_and_update(
     print(f"  LATEST LIVE TRADE RECOMMENDATION (FOR {decision['date']})")
     print("=" * 70)
     print(f"  Target Asset              : Coca-Cola ($KO)")
+    if "session" in decision:
+        print(f"  Session Checkpoint        : {decision['session']}")
     print(f"  Model Probability (Alpha) : {decision.get('probability_outperform', 0.5):.4f}")
     if "expected_alpha_5d_pct" in decision:
         print(f"  Expected 5d Alpha Return  : {decision['expected_alpha_5d_pct']:+.3f}%")
