@@ -62,7 +62,7 @@ class ModelTrainer:
             )
         elif self.model_type == "ridge":
             return LogisticRegression(
-                C=1.0,
+                C=0.01,
                 max_iter=1000,
                 random_state=42,
             )
@@ -187,20 +187,23 @@ class ModelTrainer:
         # Predict probability of class 1 (Outperform)
         prob = float(self.fitted_model.predict_proba(X_scaled)[-1, 1])
 
-        # Sizing and action
-        confidence = abs(prob - 0.5) * 2.0
-        if prob >= 0.55:
+        # Sizing and action with realistic financial calibration
+        confidence = float(np.clip((abs(prob - 0.5) / 0.12) * 0.50, 0.05, 0.65))
+
+        # Continuous active tilt allocation around neutral 50% benchmark weight
+        tilt = (prob - 0.50) / 0.08
+        target_weight = float(np.clip(0.50 + tilt * 0.50, 0.0, 1.0))
+
+        if prob >= 0.52:
             action = "BUY / LONG"
-            target_weight = min(1.0, confidence * 1.5)
-        elif prob <= 0.45:
-            action = "NEUTRAL / CASH"  # Or SHORT if shorting is permitted
-            target_weight = 0.0
+        elif prob <= 0.48:
+            action = "NEUTRAL / CASH"
         else:
             action = "HOLD / NEUTRAL"
-            target_weight = 0.0
 
         return {
-            "date": str(X_latest.index[-1].date()),
+            "date": date_str,
+            "session": session_name,
             "target": "Coca-Cola ($KO)",
             "probability_outperform": round(prob, 4),
             "confidence": round(confidence, 4),

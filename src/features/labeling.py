@@ -41,8 +41,10 @@ class TargetLabeler:
             alpha = target_fwd_ret
 
         # Binary classification target: 1 = Long (positive relative alpha), 0 = Short / Neutral
-        # If neutral_threshold > 0, we can also generate a strong signal indicator
-        binary_label = (alpha > 0).astype(int)
+        # Preserve NaNs at the forward horizon boundary so they are cleanly excluded
+        binary_label = pd.Series(index=alpha.index, dtype=float)
+        valid_mask = alpha.notna()
+        binary_label.loc[valid_mask] = (alpha.loc[valid_mask] > 0).astype(float)
 
         # Retain raw forward return for backtesting evaluation
         return binary_label, target_fwd_ret

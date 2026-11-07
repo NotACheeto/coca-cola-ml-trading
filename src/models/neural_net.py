@@ -151,11 +151,13 @@ class PyTorchNeuralNetClassifier:
         hidden_dims: Optional[List[int]] = None,
         dropout: float = 0.30,
         learning_rate: float = 0.001,
-        weight_decay: float = 0.0001,
+        weight_decay: float = 0.001,
         epochs: int = 80,
         batch_size: int = 64,
         early_stopping_patience: int = 12,
         random_state: int = 42,
+        temperature: float = 3.5,
+        label_smoothing: float = 0.15,
     ):
         self.hidden_dims = hidden_dims or [1024, 1024, 512, 512, 256, 128, 64]
         self.dropout = dropout
@@ -165,6 +167,8 @@ class PyTorchNeuralNetClassifier:
         self.batch_size = batch_size
         self.early_stopping_patience = early_stopping_patience
         self.random_state = random_state
+        self.temperature = temperature
+        self.label_smoothing = label_smoothing
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model: Optional[CocaColaQuantNeuralMachine] = None
@@ -197,7 +201,7 @@ class PyTorchNeuralNetClassifier:
             dropout=self.dropout,
         ).to(self.device)
 
-        criterion_ce = nn.CrossEntropyLoss()
+        criterion_ce = nn.CrossEntropyLoss(label_smoothing=self.label_smoothing)
         criterion_huber = nn.HuberLoss(delta=0.01)
 
         optimizer = torch.optim.AdamW(
@@ -318,7 +322,7 @@ class PyTorchNeuralNetClassifier:
         with torch.no_grad():
             x_t = torch.from_numpy(X_arr).to(self.device)
             logits, _, _ = self.model(x_t)
-            probs = torch.softmax(logits, dim=-1).cpu().numpy()
+            probs = torch.softmax(logits / self.temperature, dim=-1).cpu().numpy()
         return probs
 
     def predict(self, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
@@ -329,7 +333,7 @@ class PyTorchNeuralNetClassifier:
         """
         Executes multi-task quantitative prediction for Coca-Cola ($KO).
         Computes directional probability, continuous expected return, predictive uncertainty,
-        and optimal risk-adjusted Kelly sizing.
+        and optimal risk-adjusted active sizing.
         """
         if self.model is None:
             raise RuntimeError("Model is not fitted.")
@@ -339,30 +343,28 @@ class PyTorchNeuralNetClassifier:
         with torch.no_grad():
             x_t = torch.from_numpy(X_arr).to(self.device)
             logits, expected_ret_t, var_t = self.model(x_t)
-            prob_outperform = float(torch.softmax(logits, dim=-1)[-1, 1].item())
+            prob_outperform = float(torch.softmax(logits / self.temperature, dim=-1)[-1, 1].item())
             expected_alpha = float(expected_ret_t[-1, 0].item())
             pred_vol = float(torch.sqrt(var_t[-1, 0]).item())
 
-        confidence = abs(prob_outperform - 0.5) * 2.0
+        # Real-world quant confidence: normalized by typical 0.12 financial alpha bandwidth
+        raw_conf = (abs(prob_outperform - 0.5) / 0.12) * 0.50
+        confidence = float(np.clip(raw_conf, 0.05, 0.65))
 
-        # Mean-Variance / Kelly Position Sizing:
-        # Scale continuous expected alpha by uncertainty and directional confidence
-        risk_aversion = 2.0
-        raw_kelly = (expected_alpha / (risk_aversion * (pred_vol ** 2) + 1e-6)) * confidence
-        target_weight = float(np.clip(raw_kelly, -1.0, 1.0))
+        # Active tilt around benchmark:
+        tilt = (prob_outperform - 0.50) / 0.08
+        target_weight = float(np.clip(0.50 + tilt * 0.50, 0.0, 1.0))
 
-        if prob_outperform >= 0.55 and expected_alpha > 0:
+        if prob_outperform >= 0.52 and expected_alpha > -0.002:
             action = "BUY / LONG"
-            target_weight = max(0.15, min(1.0, abs(target_weight)))
-        elif prob_outperform <= 0.45 or expected_alpha < -0.005:
+        elif prob_outperform <= 0.48:
             action = "NEUTRAL / CASH"
             target_weight = 0.0
         else:
             action = "HOLD / NEUTRAL"
-            target_weight = 0.0
 
         return {
-            "date": str(X_latest.index[-1].date()),
+            "date": str(X_latest.index[-1]),
             "target": "Coca-Cola ($KO)",
             "probability_outperform": round(prob_outperform, 4),
             "expected_alpha_5d_pct": round(expected_alpha * 100.0, 3),
@@ -437,8 +439,8 @@ class EnsembleQuantClassifier:
         self.lgbm_model = lgb.LGBMClassifier(**default_lgb)
         self.lgbm_model.fit(X_df, y_ser)
 
-        # 3. Fit Ridge Logistic Regression
-        self.ridge_model = LogisticRegression(C=1.0, max_iter=1000, random_state=42)
+        # 3. Fit Ridge Logistic Regression with strong L2 shrinkage
+        self.ridge_model = LogisticRegression(C=0.01, max_iter=1000, random_state=42)
         self.ridge_model.fit(X_df, y_ser)
 
         # Blend feature importances
@@ -474,5 +476,58 @@ class EnsembleQuantClassifier:
         return (probs[:, 1] >= 0.5).astype(int)
 
     def predict_signal(self, X_latest: pd.DataFrame) -> Dict[str, Any]:
-        """Delegates to the Quant Neural Machine's multi-task prediction engine."""
-        return self.nn_model.predict_signal(X_latest)
+        """
+        True multi-model quantitative ensemble prediction for Coca-Cola ($KO).
+        Blends Neural Net (50%), LightGBM (35%), and Ridge (15%).
+        Calculates calibrated ensemble consensus, dispersion-penalized confidence,
+        and continuous active position allocation.
+        """
+        p_nn = float(self.nn_model.predict_proba(X_latest)[-1, 1])
+        p_lgb = float(self.lgbm_model.predict_proba(X_latest)[-1, 1])
+        p_ridge = float(self.ridge_model.predict_proba(X_latest)[-1, 1])
+
+        blended_prob = float(
+            self.neural_weight * p_nn
+            + self.lgbm_weight * p_lgb
+            + self.ridge_weight * p_ridge
+        )
+
+        nn_sig = self.nn_model.predict_signal(X_latest)
+        expected_alpha = nn_sig["expected_alpha_5d_pct"] / 100.0
+        pred_vol = nn_sig["predictive_volatility_pct"] / 100.0
+
+        # Institutional confidence: measures deviation from 0.50 normalized by 0.12 band
+        # Penalized if submodels disagree (high dispersion)
+        dispersion = float(np.std([p_nn, p_lgb, p_ridge]))
+        raw_conf = (abs(blended_prob - 0.5) / 0.12) * 0.50
+        confidence = float(np.clip(raw_conf * max(0.2, 1.0 - dispersion * 2.0), 0.05, 0.65))
+
+        # Active tilt around benchmark:
+        tilt = (blended_prob - 0.50) / 0.08
+        target_weight = float(np.clip(0.50 + tilt * 0.50, 0.0, 1.0))
+
+        if blended_prob >= 0.52:
+            action = "BUY / LONG"
+        elif blended_prob <= 0.48:
+            action = "NEUTRAL / CASH"
+            target_weight = 0.0
+        else:
+            action = "HOLD / NEUTRAL"
+
+        return {
+            "date": str(X_latest.index[-1]),
+            "target": "Coca-Cola ($KO)",
+            "probability_outperform": round(blended_prob, 4),
+            "expected_alpha_5d_pct": round(expected_alpha * 100.0, 3),
+            "predictive_volatility_pct": round(pred_vol * 100.0, 2),
+            "confidence": round(confidence, 4),
+            "confidence_pct": round(confidence * 100.0, 1),
+            "recommended_weight": round(target_weight, 4),
+            "recommended_weight_pct": round(target_weight * 100.0, 1),
+            "action": action,
+            "submodel_probs": {
+                "neural_machine": round(p_nn, 4),
+                "lightgbm": round(p_lgb, 4),
+                "ridge": round(p_ridge, 4),
+            },
+        }

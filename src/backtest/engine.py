@@ -61,11 +61,13 @@ class BacktestEngine:
         if self.position_sizing == "binary":
             raw_weights = pd.Series(np.where(probs >= 0.50, 1.0, -1.0 if self.allow_short else 0.0), index=common_idx)
         elif self.position_sizing == "confidence_weighted":
-            # Scale continuously from -1.0 to +1.0 based on distance from 0.5
-            centered = (probs - 0.5) * 2.0
             if not self.allow_short:
-                centered = centered.clip(lower=0.0)
-            raw_weights = centered.clip(lower=-1.0, upper=1.0)
+                # Active long-only allocation: 0.50 neutral baseline adjusted by alpha edge
+                # A +/- 0.08 probability shift scales active weight from 0% (cash hedge) to 100% (bullish)
+                tilt = (probs - 0.50) / 0.08
+                raw_weights = (0.50 + tilt * 0.50).clip(lower=0.0, upper=1.0)
+            else:
+                raw_weights = ((probs - 0.50) / 0.08).clip(lower=-1.0, upper=1.0)
         elif self.position_sizing == "volatility_targeted":
             # Scale inversely by 20-day historical volatility
             roll_vol = daily_ret.rolling(20).std() * np.sqrt(252)
